@@ -17,8 +17,10 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import TimerAction
+from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 # How long each fake action sleeps before returning success. Short = fast cycle.
@@ -36,8 +38,11 @@ def _fake(executable: str) -> Node:
 
 def generate_launch_description() -> LaunchDescription:
     safety_share = get_package_share_directory('g1_courier_safety')
+    max_cycles = LaunchConfiguration('max_cycles')
 
     return LaunchDescription([
+        DeclareLaunchArgument('max_cycles', default_value='0',
+                              description='0 = run forever, N = stop after N cycles'),
         # Sim base + sensors fixture.
         Node(package='g1_courier_sim', executable='sim_cmd_vel_bridge_node',
              name='sim_cmd_vel_bridge_node'),
@@ -61,6 +66,9 @@ def generate_launch_description() -> LaunchDescription:
         # wait_for_server(1.0) on each behaviour; missing a server -> FAILURE.
         TimerAction(period=3.0, actions=[
             Node(package='g1_courier_mission', executable='mission_node',
-                 name='mission_node'),
+                 name='mission_node',
+                 parameters=[{
+                     'max_cycles': ParameterValue(max_cycles, value_type=int),
+                 }]),
         ]),
     ])

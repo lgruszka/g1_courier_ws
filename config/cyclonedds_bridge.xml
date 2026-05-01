@@ -18,7 +18,9 @@
       </Peers>
       <!-- ParticipantIndex=auto picks first free port; 'none' would force unicast-only. -->
       <ParticipantIndex>auto</ParticipantIndex>
-      <MaxAutoParticipantIndex>10</MaxAutoParticipantIndex>
+      <!-- 50 covers a full launch (10+ nodes), plus daemon, plus mac MuJoCo
+           publisher on the same DDS network. 10 was too tight. -->
+      <MaxAutoParticipantIndex>50</MaxAutoParticipantIndex>
     </Discovery>
   </Domain>
 </CycloneDDS>

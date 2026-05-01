@@ -33,10 +33,67 @@ from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 
 from g1_courier_msgs.action import DockToTable
+from g1_courier_msgs.msg import MissionStatus
 
 from .behaviors import (
     DockTo, NavigateTo, Pick, Place, RetreatBy, SetCarry, TableConfig,
 )
+
+
+class _MissionStatusPublisher:
+    """Per-tick post-handler: detects cycle completion, publishes MissionStatus,
+    and shuts down rclpy when `max_cycles > 0` and the limit is reached."""
+
+    def __init__(self, node: Node, max_cycles: int) -> None:
+        self._node = node
+        self._max_cycles = int(max_cycles)
+        self._cycle_count = 0
+        self._was_success = False
+        self._stopped = False
+        self._started = node.get_clock().now().to_msg()
+        self._pub = node.create_publisher(MissionStatus, '/mission_status', 10)
+
+    def post_tick(self, tree: py_trees_ros.trees.BehaviourTree) -> None:
+        if self._stopped:
+            return
+        root = tree.root
+        # Cycle completion: rising edge from non-SUCCESS to SUCCESS at root.
+        if root.status == py_trees.common.Status.SUCCESS:
+            if not self._was_success:
+                self._cycle_count += 1
+                self._node.get_logger().info(f'cycle {self._cycle_count} complete')
+                if 0 < self._max_cycles <= self._cycle_count:
+                    self._node.get_logger().info(
+                        f'max_cycles={self._max_cycles} reached — shutting down')
+                    self._stopped = True
+                    try:
+                        tree.interrupt()
+                    except Exception:
+                        pass
+                    rclpy.shutdown()
+                    return
+            self._was_success = True
+        else:
+            self._was_success = False
+
+        # Find the currently RUNNING leaf (deepest behaviour without children).
+        running: py_trees.behaviour.Behaviour | None = None
+        for b in root.iterate():
+            if b.status == py_trees.common.Status.RUNNING and not b.children:
+                running = b
+                break
+
+        msg = MissionStatus()
+        msg.current_state = running.name if running else root.status.name
+        msg.cycle_count = self._cycle_count
+        msg.box_held = False  # TODO: derive from blackboard once SetCarry writes it
+        msg.started_at = self._started
+        if running:
+            for cand in ('table_a', 'table_b'):
+                if cand in running.name:
+                    msg.current_target = cand
+                    break
+        self._pub.publish(msg)
 
 
 def _load_waypoints(node: Node) -> Dict[str, TableConfig]:
@@ -124,6 +181,10 @@ def build_tree(node: Node, waypoints: Dict[str, TableConfig]) -> py_trees.compos
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = rclpy.create_node('mission_node')
+    node.declare_parameter('tick_period_ms', 500)
+    node.declare_parameter('max_cycles', 0)
+    tick_period_ms = max(50, int(node.get_parameter('tick_period_ms').value))
+    max_cycles = int(node.get_parameter('max_cycles').value)
 
     try:
         waypoints = _load_waypoints(node)
@@ -140,15 +201,22 @@ def main(args=None) -> None:
         node.get_logger().error(f'BT setup timed out: {exc}')
         sys.exit(1)
 
-    tree.tick_tock(period_ms=500)
+    status_pub = _MissionStatusPublisher(node, max_cycles=max_cycles)
+    tree.add_post_tick_handler(status_pub.post_tick)
+
+    tree.tick_tock(period_ms=tick_period_ms)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        tree.shutdown()
+        try:
+            tree.shutdown()
+        except Exception:
+            pass
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 # Build the workspace incrementally. Run from anywhere; this script cds first.
 HERE="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "$HERE"
 
-# Source ROS2 if not already.
+# Source ROS2 if not already. Disable -u temporarily because /opt/ros/*/setup.bash
+# touches AMENT_TRACE_SETUP_FILES and other unset-by-default vars.
 if [ -z "${ROS_DISTRO:-}" ]; then
+  set +u
   for d in humble jazzy iron rolling; do
     if [ -f "/opt/ros/$d/setup.bash" ]; then
       # shellcheck disable=SC1090
@@ -14,6 +16,7 @@ if [ -z "${ROS_DISTRO:-}" ]; then
       break
     fi
   done
+  set -u
 fi
 echo "ROS_DISTRO=${ROS_DISTRO:-unknown}"
 

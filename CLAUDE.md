@@ -34,7 +34,7 @@ Przeczytaj w tej kolejności:
 | `cmd_vel_arbiter` z carry mode + freeze + e-stop | ✅ pełne |
 | `navigate_proxy` → nav2 | ✅ pełne |
 | `retreat` action server | ✅ pełne |
-| Mission BT (cykl A↔B 4-fazowy) | ✅ scaffold; bez blackboard cycle counter |
+| Mission BT (cykl A↔B 4-fazowy) | ✅ pełne; cycle counter + MissionStatus publishing + max_cycles parameter |
 | Launch full + mapping | ✅ scaffold |
 | Configi nav2 / slam_toolbox / amcl / apriltag | ✅ scaffold, **wszystkie wartości oznaczone `TODO_TUNE` do dostrojenia w symie** |
 | `sim_cmd_vel_bridge_node` (kinematic, Faza 0 no-sim) | ✅ pełne, smoke test 4-fazowego cyklu BT przeszedł |
