@@ -52,6 +52,9 @@ class _MissionStatusPublisher:
         self._stopped = False
         self._started = node.get_clock().now().to_msg()
         self._pub = node.create_publisher(MissionStatus, '/mission_status', 10)
+        # Read-only blackboard view of carry state (written by SetCarry).
+        self._bb = py_trees.blackboard.Client(name='mission_status_publisher')
+        self._bb.register_key(key='box_held', access=py_trees.common.Access.READ)
 
     def post_tick(self, tree: py_trees_ros.trees.BehaviourTree) -> None:
         if self._stopped:
@@ -86,7 +89,11 @@ class _MissionStatusPublisher:
         msg = MissionStatus()
         msg.current_state = running.name if running else root.status.name
         msg.cycle_count = self._cycle_count
-        msg.box_held = False  # TODO: derive from blackboard once SetCarry writes it
+        try:
+            msg.box_held = bool(self._bb.box_held)
+        except KeyError:
+            # SetCarry has not been ticked yet → no box.
+            msg.box_held = False
         msg.started_at = self._started
         if running:
             for cand in ('table_a', 'table_b'):

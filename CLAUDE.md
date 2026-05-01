@@ -28,7 +28,7 @@ Przeczytaj w tej kolejności:
 | Definicje `g1_courier_msgs` (action/srv/msg) | ✅ pełne |
 | Arm controller (parametric, CRC, weight ramping, grasp verifier) | ✅ pełne, IK hook to-do |
 | `pick_box` / `place_box` action servery | ✅ pełne |
-| `dock_to_table` action server, tryb APRILTAG | ✅ pełne |
+| `dock_to_table` action server, tryb APRILTAG | 🟡 servo loop OK, ale `_extract_tag_residual` polega na `det.pose.pose.pose.position` którego `apriltag_msgs/AprilTagDetection` z `ros-jazzy-apriltag-ros` NIE ma (tylko homography + corners). Pełna integracja wymaga (a) TF z osobnego pose estimation node'a, lub (b) solvePnP w naszym kodzie z homography + camera_info — robione w Fazie 1.1 |
 | `dock_to_table` tryb LIDAR_LINE | ✅ RANSAC line fit + perpendicular alignment, walidowane na fixture (1.8 mm xy / 1.7° yaw convergence) |
 | `dock_to_table` tryb AMCL_ONLY | ✅ pełne (trywialne) |
 | `cmd_vel_arbiter` z carry mode + freeze + e-stop | ✅ pełne |

@@ -186,6 +186,9 @@ class SetCarry(py_trees.behaviour.Behaviour):
         self._carrying = bool(carrying)
         self._client = node.create_client(SetCarryMode, '/safety/set_carry_mode')
         self._future = None
+        # Mirror the carry state on the blackboard so MissionStatus can read it.
+        self._bb = self.attach_blackboard_client(name=name)
+        self._bb.register_key(key='box_held', access=py_trees.common.Access.WRITE)
 
     def initialise(self) -> None:
         if not self._client.wait_for_service(timeout_sec=1.0):
@@ -200,6 +203,8 @@ class SetCarry(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.FAILURE
         if not self._future.done():
             return py_trees.common.Status.RUNNING
+        # Service ack received — record the new state on blackboard.
+        self._bb.box_held = self._carrying
         return py_trees.common.Status.SUCCESS
 
 
