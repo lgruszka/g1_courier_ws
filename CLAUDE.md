@@ -48,7 +48,7 @@ Przeczytaj w tej kolejności:
 | `sim_lidar_publisher_node` (LiDAR fixture, ray-cast vs odom) | ✅ |
 | AprilTag tagi + kamera RGB w `unitree_mujoco` scene XML (Faza 1.1) | ❌ mac side, edycja scene_29dof.xml |
 | Real LiDAR sensor w `unitree_mujoco` scene XML (Faza 1.2) | ❌ mac side, rangefinder array |
-| **Walking controller** (`/cmd_vel` → leg motors), Faza 1.3 | ❌ **brama dla 1.4–1.6**; w MuJoCo robot leży, bo nogi bez momentu |
+| **Walking controller** (`/cmd_vel` → leg motors), Faza 1.3 | ❌ **brama dla 1.4–1.6**; α (per-joint PD bez gravity feedforward) próbowany w `g1_courier_locomotion/walking_controller_node` — robot oscyluje i pada (per-joint PD niewystarczy bez whole-body coordination). Następny krok: β (RL policy z unitree_rl_gym). Kod α zachowany jako wireup pod β. |
 | Mapa z LiDAR `slam_toolbox` w MuJoCo (Faza 1.4) | ❌ wymaga 1.2 + 1.3 |
 | AMCL + nav2 real `navigate_to_pose` (Faza 1.5) | ❌ wymaga 1.4 |
 | Pełen mission BT cycle z real ruchem A↔B (Faza 1.6) | ❌ wymaga 1.1 + 1.5 |
@@ -83,10 +83,10 @@ Każda kolejna sub-faza wymaga poprzednich. Walking controller (1.3) jest **bram
 - **1.1 — AprilTag w scene + dock APRILTAG**: dorobić tag textury w scene XML, włączyć kamerę RGB, podpiąć `apriltag_ros` na detekcje, real `dock_action_server` MODE_APRILTAG.
 - **1.2 — LiDAR sensor w scene XML + `/scan`**: dodać rangefinder array w MuJoCo (Mid360 surrogate), bridge eksportuje LaserScan na DDS, dock LIDAR_LINE może chodzić na real LiDAR (zamiast `sim_lidar_publisher_node`).
 - **1.3 — walking controller** (`/cmd_vel` → motor commands na nogi): conditio sine qua non dla 1.4+. Trzy realne ścieżki:
-  - α) **Standing PD + cmd_vel fakery** (~1 dzień): PD trzyma standing pose, `/cmd_vel` przekłada się na przechylanie tułowia + lekkie zmiany nóg. Robot stoi i wygląda na poruszanego, ale nie chodzi krokami. Dla testów logiki BT/nav2 wystarcza.
-  - β) **Pretrained RL policy** (`unitree_rl_gym` lub HuggingFace): kilka dni jeśli policy istnieje, dłużej jeśli trzeba trenować na cloud GPU.
+  - α) **Standing PD + cmd_vel fakery** — **PRÓBOWANE, NIE DZIAŁA**. Per-joint PD bez gravity feedforward i bez whole-body coordination (CoM, ground reaction forces) nie utrzyma G1 stojącego: drobne błędy generują pełen moment, oscylacje, upadek. Kod w `g1_courier_locomotion/walking_controller_node.py` zostawiony jako rusztowanie (subscribe `/cmd_vel`/`/lowstate`/`/arm_intent`, publish `/lowcmd`) — pasożytuje α-style targety na nogach + arm passthrough. Lepszy α wymagałby (a) gravity feedforward `tau` per joint, (b) IMU-based balance correction, (c) CoM tracking — nadal nieformalne whole-body, ryzyko że dalej oscyluje.
+  - β) **Pretrained RL policy** (`unitree_rl_gym` lub HuggingFace): kilka dni jeśli policy istnieje, dłużej jeśli trzeba trenować na cloud GPU. **Następny realny krok dla 1.3.**
   - γ) **Whole-body MPC**: research-grade, sesje+, bardzo wysokie ryzyko.
-  - **Rekomendacja**: α najpierw — odblokowuje 1.4–1.6 z minimum effort, β/γ później jeśli α okaże się niewystarczająca.
+  - **Aktualna rekomendacja**: pomiń α, idź wprost do β. Workspace gotowy — `walking_controller_node` można zastąpić nodem ładującym wytrenowaną policy na to samo wejście/wyjście (subscribes `/cmd_vel` `/lowstate` `/arm_intent`, publishes `/lowcmd`).
 - **1.4 — Mapa LiDARem** (`slam_toolbox`): wymaga 1.2 i 1.3 (manual teleop driving po sali).
 - **1.5 — AMCL + nav2 + real `navigate_to_pose`**: wymaga 1.4.
 - **1.6 — Pełen mission BT cycle z prawdziwym ruchem A↔B**: wymaga 1.5 i 1.1.
@@ -211,7 +211,8 @@ Pełne zasady w `docs/ARCHITECTURE.md`. Najważniejsze, których nie wolno łama
 - **AMCL nie konwerguje** — daj initial pose w rviz, albo skonfiguruj `set_initial_pose`.
 - **MuJoCo renderowanie wolne** — virtio GPU w Parallels daje ~5-10 FPS. Wystarcza do `apriltag_ros`, ale przy dynamicznym docku może wymagać GPU passthrough. Headless mode dla samego physics jest szybki.
 - **`unitree_mujoco` ROS2 bridge nie publikuje** — sprawdź `ROS_DOMAIN_ID` i czy używasz tego samego RMW (cyclonedds zalecane przez Unitree).
-- **Robot leży w MuJoCo, ramiona się ruszają** — oczekiwane do końca Fazy 1.2. `unitree_mujoco` nie ma walking controllera, my (do Fazy 1.3) sterujemy tylko ramionami przez arm_sdk. `/cmd_vel` ląduje w `sim_cmd_vel_bridge_node` (Linux TF), nie w mac MuJoCo motors. Po Fazie 1.3 robot przynajmniej stoi (α — standing PD), po dorobieniu walking — chodzi.
+- **Robot leży w MuJoCo, ramiona się ruszają** — oczekiwane przed Fazą 1.3. `unitree_mujoco` nie ma walking controllera, my (do Fazy 1.3) sterujemy tylko ramionami przez arm_sdk. `/cmd_vel` ląduje w `sim_cmd_vel_bridge_node` (Linux TF), nie w mac MuJoCo motors. Po Fazie 1.3 robot będzie stał i chodzić.
+- **Robot oscyluje i wpada w drgawki gdy włączymy `walking_controller_node`** — oczekiwane: per-joint PD bez gravity feedforward / whole-body coordination nie utrzyma G1. To znana ścieżka α która "naukowo" nie powinna działać. Zostawiamy ten kod jako wireup, ale **nie uruchamiamy** w default launch. Faza 1.3 wymaga β (RL policy).
 - **`grasp_verified=true` w MuJoCo bez kartonu** — false-positive: gdy robot leży na boku (typowe, bo bipedal bez kontrolera = upadek), grawitacja boczna napina ramiona, `tau_est` rośnie powyżej `grasp_tau_threshold_nm` (default 1.5 Nm). W realu (robot stojący prosto) grawitacja działa wzdłuż osi ramienia i nie powoduje fałszywego dodatka. Dla testów MuJoCo można albo zwiększyć próg, albo trzymać robota balansującego (kontroler chodu) zanim odpalisz `pick`.
 - **`release_verified=false` w MuJoCo bez kartonu** — symetryczny false-negative: `verify_release` oczekuje że τ_est wróci do baseline z dokładnością `< threshold`. Sekwencja `place` zmienia konfigurację stawów (P5→ZERO), więc grawitacja boczna na leżącym robocie produkuje **inne** τ niż baseline, nie podobne. `place` zwróci `success=False, status=ABORTED` mimo że ramiona wykonały pełną sekwencję. Tak jak grasp false-positive: logika verifier'a jest poprawna, bug jest w setupie testowym.
 - **`unitree_sdk2py` po stronie publishera nie wpisuje type hash** — `[WARN] rmw_cyclonedds_cpp: Failed to parse type hash for topic 'rt/lowstate' from USER_DATA '(null)'`. Kosmetyka. Type matching idzie po nazwie typu i działa; brakuje tylko ROS2-specific extra integrity check.

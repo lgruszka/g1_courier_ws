@@ -59,6 +59,13 @@ def generate_launch_description() -> LaunchDescription:
              name='cmd_vel_arbiter',
              parameters=[os.path.join(safety_share, 'config', 'safety.yaml')]),
 
+        # NOTE: walking_controller_node is NOT launched here. The Phase 1.3
+        # alpha attempt (per-joint PD with no gravity feedforward) was tested
+        # and proved insufficient — the robot oscillates and falls. The
+        # `g1_courier_locomotion` package keeps the node as a starting point
+        # for variant β (RL policy from unitree_rl_gym). For now arm action
+        # servers publish straight to /lowcmd and the robot stays lying down
+        # in MuJoCo while arms are exercised.
         # Real arm action servers, talking to the MuJoCo bridge on /lowcmd.
         Node(package='g1_courier_arm_skills', executable='pick_action_server',
              name='pick_action_server',
