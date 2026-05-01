@@ -1,0 +1,4 @@
+bool freeze       # true = arbiter publishes zero cmd_vel regardless of upstream
+---
+bool success
+string message

@@ -1,0 +1,4 @@
+bool carrying     # true = parcel held -> arbiter applies carry-mode caps
+---
+bool success
+string message

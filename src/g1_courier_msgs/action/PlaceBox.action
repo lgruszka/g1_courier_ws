@@ -1,0 +1,13 @@
+# Goal: execute a place sequence and release the parcel.
+geometry_msgs/PoseStamped target_pose   # in base_link; optional, "" -> nominal keyframes
+string sequence_name                    # default "place_box"
+float32 timeout_s
+---
+# Result
+bool success
+string message
+bool release_verified                   # tau dropped after release
+---
+# Feedback
+string phase                            # "approach" / "lower" / "release" / "retract"
+float32 progress

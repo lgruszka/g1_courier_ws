@@ -1,0 +1,36 @@
+# colcon build outputs
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+
+# rosdep / ament cache
+.colcon/
+.cache/
+
+# editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Claude Code local session/settings
+.claude/
+
+# upstream Unitree code we cloned but do not own
+src/unitree_ros2/example/
+
+# saved maps (binary, may be large; keep yamls if they are useful)
+maps/*.pgm
+
+# local sensitive
+.env
+*.local

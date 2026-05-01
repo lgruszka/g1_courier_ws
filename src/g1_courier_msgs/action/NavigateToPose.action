@@ -1,0 +1,16 @@
+# Goal: drive to a 2D pose using nav2.
+geometry_msgs/PoseStamped target_pose
+string waypoint_name
+float32 xy_tolerance_m       # 0 = use nav2 default
+float32 yaw_tolerance_rad    # 0 = use nav2 default
+float32 timeout_s            # 0 = no timeout
+---
+# Result
+bool success
+string message
+geometry_msgs/PoseStamped final_pose
+---
+# Feedback
+geometry_msgs/PoseStamped current_pose
+float32 distance_remaining_m
+string phase

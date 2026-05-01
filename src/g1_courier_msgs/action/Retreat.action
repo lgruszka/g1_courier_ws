@@ -1,0 +1,12 @@
+# Goal: drive backwards a fixed distance with a fixed speed (open-loop helper).
+float32 distance_m
+float32 speed_mps                # absolute value, sign forced negative on linear.x
+float32 timeout_s
+---
+# Result
+bool success
+string message
+float32 distance_traveled_m
+---
+# Feedback
+float32 distance_traveled_m

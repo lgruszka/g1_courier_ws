@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>g1_courier_docking</name>
+  <version>0.1.0</version>
+  <description>DockToTable action server with AprilTag, LiDAR-line and AMCL-only modes.</description>
+  <maintainer email="lukasz.gruszka90@gmail.com">Lukasz Gruszka</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>apriltag_msgs</exec_depend>
+  <exec_depend>g1_courier_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,0 +1,19 @@
+pick_action_server:
+  ros__parameters:
+    arm_sdk_topic: /arm_sdk
+    lowstate_topic: /lowstate
+    grasp_tau_threshold_nm: 1.5    # TODO_TUNE: depends on parcel mass and arm geometry
+    control_dt_s: 0.02
+    kp: 80.0
+    kd: 2.0
+    require_grasp_verified: true   # set false in MuJoCo where tau_est is bogus
+
+place_action_server:
+  ros__parameters:
+    arm_sdk_topic: /arm_sdk
+    lowstate_topic: /lowstate
+    grasp_tau_threshold_nm: 1.5
+    control_dt_s: 0.02
+    kp: 80.0
+    kd: 2.0
+    require_release_verified: true  # set false in MuJoCo where tau_est is bogus

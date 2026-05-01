@@ -1,0 +1,15 @@
+cmd_vel_arbiter:
+  ros__parameters:
+    output_topic: /cmd_vel
+    publish_rate_hz: 20.0
+    cmd_timeout_s: 0.4
+
+    # Normal locomotion limits.
+    max_vx_normal: 0.6
+    max_vy_normal: 0.4
+    max_vyaw_normal: 0.8
+
+    # Carry-mode limits (parcel held). Tighter so the arms stay steady.
+    max_vx_carry: 0.3        # TODO_TUNE: walking speed with parcel
+    max_vy_carry: 0.2
+    max_vyaw_carry: 0.4

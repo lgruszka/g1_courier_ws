@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <!-- Explicit interface; Parallels guest has only enp0s5 on the
+             Shared Network. autodetermine sometimes picks the wrong one. -->
+        <NetworkInterface name="enp0s5" />
+      </Interfaces>
+      <AllowMulticast>spdp</AllowMulticast>
+    </General>
+    <Discovery>
+      <!-- Unicast peer: macOS host on Parallels Shared Network. The host
+           IS on 10.211.55.2 (TTL=64). 10.211.55.1 is the Parallels firmware
+           router (TTL=128) which does not run our DDS publisher. -->
+      <Peers>
+        <Peer address="10.211.55.2" />
+      </Peers>
+      <!-- ParticipantIndex=auto picks first free port; 'none' would force unicast-only. -->
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>10</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

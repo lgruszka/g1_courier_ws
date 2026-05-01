@@ -1,0 +1,13 @@
+# Goal: execute a pick sequence, optionally adapted to a measured box pose.
+geometry_msgs/PoseStamped box_pose   # in base_link; if header.frame_id == "" -> use nominal keyframes
+string sequence_name                 # default "pick_box"
+float32 timeout_s
+---
+# Result
+bool success
+string message
+bool grasp_verified                  # tau-based verifier
+---
+# Feedback
+string phase                         # "wait_for_state" / "approach" / "grasp" / "lift" / "verify"
+float32 progress                     # 0.0 .. 1.0

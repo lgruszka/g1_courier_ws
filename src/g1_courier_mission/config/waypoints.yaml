@@ -1,0 +1,18 @@
+tables:
+  table_a:
+    apriltag_id: 5
+    predock_x: 1.50      # TODO_TUNE: in 'map' frame, ~0.8 m in front of pick spot
+    predock_y: 0.00
+    predock_yaw: 0.00    # facing the table
+    dock_mode: apriltag
+    final_xy_tol_m: 0.03
+    final_yaw_tol_rad: 0.05
+
+  table_b:
+    apriltag_id: 7
+    predock_x: 4.00
+    predock_y: 0.00
+    predock_yaw: 0.00
+    dock_mode: lidar_line   # camera occluded by carried parcel
+    final_xy_tol_m: 0.06    # looser - place is more forgiving
+    final_yaw_tol_rad: 0.07

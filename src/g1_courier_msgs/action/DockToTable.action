@@ -1,0 +1,26 @@
+# Goal: refine pose at a table using one of three strategies.
+uint8 MODE_APRILTAG=0    # close-loop on full 6-DoF AprilTag pose
+uint8 MODE_LIDAR_LINE=1  # fit table edge in 2D scan, align perpendicular
+uint8 MODE_AMCL_ONLY=2   # trust AMCL pose (cheapest, used as fallback)
+
+uint8 mode
+int32 apriltag_id                            # used in MODE_APRILTAG
+geometry_msgs/PoseStamped target_pose        # frame depends on mode
+                                             #   APRILTAG: target_pose is robot pose in tag frame
+                                             #   LIDAR_LINE / AMCL_ONLY: in 'map' frame
+float32 xy_tolerance_m
+float32 yaw_tolerance_rad
+float32 timeout_s
+---
+# Result
+bool success
+string message
+geometry_msgs/PoseStamped final_pose         # robot pose at convergence (in 'map')
+geometry_msgs/PoseStamped detected_object_pose  # tag/edge pose at convergence (for downstream pick)
+float32 final_xy_error_m
+float32 final_yaw_error_rad
+---
+# Feedback
+string phase                                 # "predock" / "servoing" / "settle"
+float32 xy_error_m
+float32 yaw_error_rad

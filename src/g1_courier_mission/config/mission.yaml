@@ -1,0 +1,13 @@
+mission_node:
+  ros__parameters:
+    tick_period_ms: 500
+    max_cycles: 0          # 0 = forever; >0 = stop after N cycles
+
+navigate_proxy:
+  ros__parameters:
+    nav2_action: navigate_to_pose
+
+retreat_action_server:
+  ros__parameters:
+    cmd_vel_topic: /cmd_vel_retreat
+    rate_hz: 20.0
