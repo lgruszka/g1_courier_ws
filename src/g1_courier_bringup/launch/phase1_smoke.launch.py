@@ -13,7 +13,9 @@ Differences from phase0:
       because the unbalanced bipedal robot falls over and gravity acts
       sideways on the arms — see CLAUDE.md "Najczęstsze problemy")
   - fake_place_action_server REPLACED analogously, require_release_verified:=false
-  - navigate / dock / retreat stay fake (no nav2/AprilTag yet)
+  - retreat is REAL retreat_action_server (drives /cmd_vel_retreat ->
+    arbiter -> /cmd_vel -> sim_cmd_vel_bridge integrates pose backward)
+  - navigate / dock stay fake (no nav2/AprilTag yet)
 
 Expected: same A→B→A cycle as phase0, but each pickup_at_X / transfer_to_X
 takes longer because the arm sequence runs for real (~14s pick, ~9s place
@@ -73,10 +75,14 @@ def generate_launch_description() -> LaunchDescription:
                  'require_release_verified': False,
              }]),
 
-        # Fake everything else (no nav2 / AprilTag / dock controller yet).
+        # Fake nav and dock (no nav2 / AprilTag / line-fit yet).
         _fake('fake_navigate_proxy'),
         _fake('fake_dock_action_server'),
-        _fake('fake_retreat_action_server'),
+
+        # Real retreat — open-loop backward drive on /cmd_vel_retreat.
+        # Arbiter routes it to /cmd_vel; sim_cmd_vel_bridge integrates pose.
+        Node(package='g1_courier_mission', executable='retreat_action_server',
+             name='retreat_action_server'),
 
         # Mission BT — delayed so all action servers are discovered first.
         TimerAction(period=3.0, actions=[

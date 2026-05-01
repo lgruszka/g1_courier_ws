@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
             'sim_cmd_vel_bridge_node = g1_courier_sim.sim_cmd_vel_bridge_node:main',
             'sim_lowstate_publisher_node = g1_courier_sim.sim_lowstate_publisher_node:main',
+            'sim_lidar_publisher_node = g1_courier_sim.sim_lidar_publisher_node:main',
             'fake_navigate_proxy = g1_courier_sim.fake_action_servers:main_navigate',
             'fake_dock_action_server = g1_courier_sim.fake_action_servers:main_dock',
             'fake_pick_action_server = g1_courier_sim.fake_action_servers:main_pick',

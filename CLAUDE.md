@@ -29,7 +29,7 @@ Przeczytaj w tej kolejności:
 | Arm controller (parametric, CRC, weight ramping, grasp verifier) | ✅ pełne, IK hook to-do |
 | `pick_box` / `place_box` action servery | ✅ pełne |
 | `dock_to_table` action server, tryb APRILTAG | ✅ pełne |
-| `dock_to_table` tryb LIDAR_LINE | 🟡 stub z TODO (RANSAC line fit do napisania) |
+| `dock_to_table` tryb LIDAR_LINE | ✅ RANSAC line fit + perpendicular alignment, walidowane na fixture (1.8 mm xy / 1.7° yaw convergence) |
 | `dock_to_table` tryb AMCL_ONLY | ✅ pełne (trywialne) |
 | `cmd_vel_arbiter` z carry mode + freeze + e-stop | ✅ pełne |
 | `navigate_proxy` → nav2 | ✅ pełne |
@@ -44,10 +44,15 @@ Przeczytaj w tej kolejności:
 | Integracja `unitree_mujoco` (Faza 1) — communication path | ✅ DDS bridge zwalidowany w obie strony |
 | Real `pick_action_server` zwalidowany na MuJoCo (bridge) | ✅ pełna sekwencja P0→P6 + grasp_verifier OK |
 | Real `place_action_server` zwalidowany na MuJoCo (bridge) | ✅ pełna sekwencja P5→ZERO + handoff_to_fsm OK |
-| `phase1_smoke.launch.py` (mission BT z real arm + fake nav/dock) | ✅ pełen cykl A↔B z 4 real arm sekwencjami w MuJoCo (~62 s) |
-| Map z LiDAR (MuJoCo) | ❌ do zrobienia w Fazie 1 |
-| Pełny przebieg misji w sym | ❌ cel Fazy 1 |
-| Walidacja foto-realistyczna na Isaac Sim (cloud) | ❌ Faza 2, na koniec |
+| `phase1_smoke.launch.py` (mission BT z real arm + retreat + fake nav/dock) | ✅ pełen cykl A↔B z 4 real arm + 2 real retreat (~70 s) |
+| `sim_lidar_publisher_node` (LiDAR fixture, ray-cast vs odom) | ✅ |
+| AprilTag tagi + kamera RGB w `unitree_mujoco` scene XML (Faza 1.1) | ❌ mac side, edycja scene_29dof.xml |
+| Real LiDAR sensor w `unitree_mujoco` scene XML (Faza 1.2) | ❌ mac side, rangefinder array |
+| **Walking controller** (`/cmd_vel` → leg motors), Faza 1.3 | ❌ **brama dla 1.4–1.6**; w MuJoCo robot leży, bo nogi bez momentu |
+| Mapa z LiDAR `slam_toolbox` w MuJoCo (Faza 1.4) | ❌ wymaga 1.2 + 1.3 |
+| AMCL + nav2 real `navigate_to_pose` (Faza 1.5) | ❌ wymaga 1.4 |
+| Pełen mission BT cycle z real ruchem A↔B (Faza 1.6) | ❌ wymaga 1.1 + 1.5 |
+| Walidacja foto-realistyczna na Isaac Sim (cloud, Faza 2) | ❌ na koniec |
 
 ## Decyzja: symulator (strategia trzy-fazowa)
 
@@ -65,10 +70,26 @@ Zamiast jednego symulatora trzy fazy o rosnącej wierności i koszcie, napędzan
 - **Co**: oficjalne repo Unitree z modelem G1 i ROS2 bridgem. Używa **`unitree_hg/LowCmd, LowState`** — *dokładnie tych samych* wiadomości co realny robot.
 - **Powody**:
   - **Real Unitree contract** — arm controller, `lowcmd_crc.py`, pick/place skille są walidowane na prawdziwym IDL kontrakcie. Brak fake'owania jak w Isaac.
-  - **Bipedalne sterowanie natywnie** — Unitree dostarcza walking control w bridge'u. Sport mode API `/cmd_vel` → walking gait działa, *nie* potrzebujemy mocka chodu.
   - **GPU opcjonalny** — fizyka MuJoCo jest CPU-only; renderowanie kamery przyspiesza GPU, ale nie wymaga RTX/CUDA.
-- **Co walidujemy**: wszystko co dla Isaac w pierwotnym planie — mapowanie LiDARem (slam_toolbox), AMCL, nav2, AprilTag detection, dock APRILTAG i LIDAR_LINE, pełen mission BT, arm na realistycznych stawach. Dochodzi: stabilność chodu (do pewnego stopnia, w granicach uproszczeń modelu).
+- **Co walidujemy**: arm controller na realistycznych stawach, IDL kontrakt LowState/LowCmd, CRC, grasp/release verifier, mission BT (sequence + recovery), dock LIDAR_LINE (RANSAC line fit). Po dorobieniu LiDAR sensora i AprilTag textur w scene XML: mapowanie LiDARem (slam_toolbox), AMCL, dock APRILTAG. Po dorobieniu walking controllera (patrz Faza 1.3 niżej): nav2 end-to-end i pełen mission cycle.
+- **Świadomy kompromis — locomotion**: `unitree_mujoco` daje **sam bridge IDL**, **nie** ma wbudowanego walking controllera. Sport mode API w realnym G1 chodzi w firmware (proprietary) — w MuJoCo trzeba dorobić własny kontroler chodu. Bez niego G1 jako bipedal natychmiast pada pod grawitacją, ramiona można sterować przez arm_sdk (działa) ale `/cmd_vel` nie ma jak dotrzeć do motors nóg. Dlatego dzielimy Fazę 1 na sub-fazy 1.0..1.6 (patrz "Sub-fazy Fazy 1" niżej) — walking controller jest **osobnym krokiem** 1.3.
 - **Hardware**: dowolny x86_64/aarch64 Linux. Renderowanie kamery przez virtio GPU (Parallels) jest wolne (~5-10 FPS) — wystarcza do `apriltag_ros`, ale dynamiczny dock może wymagać GPU passthrough lub mocniejszego hosta.
+
+### Sub-fazy Fazy 1
+
+Każda kolejna sub-faza wymaga poprzednich. Walking controller (1.3) jest **bramą** — bez niego nav2/dock APRILTAG/mapowanie nie ma jak realnie sterować robotem w MuJoCo.
+
+- **1.0 — arm + dock LIDAR_LINE** (zrobione): `pick_action_server`, `place_action_server`, `dock_action_server` MODE_LIDAR_LINE z RANSAC, mission BT cycle z fake nav/dock + real arm + real retreat.
+- **1.1 — AprilTag w scene + dock APRILTAG**: dorobić tag textury w scene XML, włączyć kamerę RGB, podpiąć `apriltag_ros` na detekcje, real `dock_action_server` MODE_APRILTAG.
+- **1.2 — LiDAR sensor w scene XML + `/scan`**: dodać rangefinder array w MuJoCo (Mid360 surrogate), bridge eksportuje LaserScan na DDS, dock LIDAR_LINE może chodzić na real LiDAR (zamiast `sim_lidar_publisher_node`).
+- **1.3 — walking controller** (`/cmd_vel` → motor commands na nogi): conditio sine qua non dla 1.4+. Trzy realne ścieżki:
+  - α) **Standing PD + cmd_vel fakery** (~1 dzień): PD trzyma standing pose, `/cmd_vel` przekłada się na przechylanie tułowia + lekkie zmiany nóg. Robot stoi i wygląda na poruszanego, ale nie chodzi krokami. Dla testów logiki BT/nav2 wystarcza.
+  - β) **Pretrained RL policy** (`unitree_rl_gym` lub HuggingFace): kilka dni jeśli policy istnieje, dłużej jeśli trzeba trenować na cloud GPU.
+  - γ) **Whole-body MPC**: research-grade, sesje+, bardzo wysokie ryzyko.
+  - **Rekomendacja**: α najpierw — odblokowuje 1.4–1.6 z minimum effort, β/γ później jeśli α okaże się niewystarczająca.
+- **1.4 — Mapa LiDARem** (`slam_toolbox`): wymaga 1.2 i 1.3 (manual teleop driving po sali).
+- **1.5 — AMCL + nav2 + real `navigate_to_pose`**: wymaga 1.4.
+- **1.6 — Pełen mission BT cycle z prawdziwym ruchem A↔B**: wymaga 1.5 i 1.1.
 
 ### Faza 2 — Isaac Sim na cloud GPU (final validation)
 
@@ -80,9 +101,10 @@ Zamiast jednego symulatora trzy fazy o rosnącej wierności i koszcie, napędzan
 
 ### Co czego *nie* testujemy w żadnej fazie
 
-- Stabilność chodu w extreme cases, balance mode, real-time gait recovery — to tylko realny robot.
+- Sport mode firmware Unitree (proprietary, real-only). W MuJoCo dorabiamy *własny* walking controller w 1.3 — może być prostszy i mniej zaawansowany niż firmware.
+- Extreme balance recovery (popchnięcia, slip, schody) — to tylko realny robot.
 - Battery management, BMS, thermal — tylko real.
-- Specyficzne hardware quirks (motor PID, joint friction, IMU drift) — tylko real.
+- Specyficzne hardware quirks (motor PID, joint friction, IMU drift, latencja CAN) — tylko real.
 
 ### Hardware referencyjny dla teamu
 
@@ -189,6 +211,7 @@ Pełne zasady w `docs/ARCHITECTURE.md`. Najważniejsze, których nie wolno łama
 - **AMCL nie konwerguje** — daj initial pose w rviz, albo skonfiguruj `set_initial_pose`.
 - **MuJoCo renderowanie wolne** — virtio GPU w Parallels daje ~5-10 FPS. Wystarcza do `apriltag_ros`, ale przy dynamicznym docku może wymagać GPU passthrough. Headless mode dla samego physics jest szybki.
 - **`unitree_mujoco` ROS2 bridge nie publikuje** — sprawdź `ROS_DOMAIN_ID` i czy używasz tego samego RMW (cyclonedds zalecane przez Unitree).
+- **Robot leży w MuJoCo, ramiona się ruszają** — oczekiwane do końca Fazy 1.2. `unitree_mujoco` nie ma walking controllera, my (do Fazy 1.3) sterujemy tylko ramionami przez arm_sdk. `/cmd_vel` ląduje w `sim_cmd_vel_bridge_node` (Linux TF), nie w mac MuJoCo motors. Po Fazie 1.3 robot przynajmniej stoi (α — standing PD), po dorobieniu walking — chodzi.
 - **`grasp_verified=true` w MuJoCo bez kartonu** — false-positive: gdy robot leży na boku (typowe, bo bipedal bez kontrolera = upadek), grawitacja boczna napina ramiona, `tau_est` rośnie powyżej `grasp_tau_threshold_nm` (default 1.5 Nm). W realu (robot stojący prosto) grawitacja działa wzdłuż osi ramienia i nie powoduje fałszywego dodatka. Dla testów MuJoCo można albo zwiększyć próg, albo trzymać robota balansującego (kontroler chodu) zanim odpalisz `pick`.
 - **`release_verified=false` w MuJoCo bez kartonu** — symetryczny false-negative: `verify_release` oczekuje że τ_est wróci do baseline z dokładnością `< threshold`. Sekwencja `place` zmienia konfigurację stawów (P5→ZERO), więc grawitacja boczna na leżącym robocie produkuje **inne** τ niż baseline, nie podobne. `place` zwróci `success=False, status=ABORTED` mimo że ramiona wykonały pełną sekwencję. Tak jak grasp false-positive: logika verifier'a jest poprawna, bug jest w setupie testowym.
 - **`unitree_sdk2py` po stronie publishera nie wpisuje type hash** — `[WARN] rmw_cyclonedds_cpp: Failed to parse type hash for topic 'rt/lowstate' from USER_DATA '(null)'`. Kosmetyka. Type matching idzie po nazwie typu i działa; brakuje tylko ROS2-specific extra integrity check.
