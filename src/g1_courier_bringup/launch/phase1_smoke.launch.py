@@ -59,13 +59,19 @@ def generate_launch_description() -> LaunchDescription:
              name='cmd_vel_arbiter',
              parameters=[os.path.join(safety_share, 'config', 'safety.yaml')]),
 
-        # NOTE: walking_controller_node is NOT launched here. The Phase 1.3
-        # alpha attempt (per-joint PD with no gravity feedforward) was tested
-        # and proved insufficient — the robot oscillates and falls. The
-        # `g1_courier_locomotion` package keeps the node as a starting point
-        # for variant β (RL policy from unitree_rl_gym). For now arm action
-        # servers publish straight to /lowcmd and the robot stays lying down
-        # in MuJoCo while arms are exercised.
+        # NOTE: walking_policy_node is NOT launched. The pretrained RL
+        # policy from unitree_rl_gym was tested and proved unsuitable for
+        # our use case — it was trained for a free-standing walking task
+        # without external arm forces, and our pick/place sequences (heavy
+        # P0..P6 arm motion, ~5 kg per arm) push the CoM into states the
+        # policy never saw. Result: violent oscillation + falls.
+        # Strategy taken instead (mirrors g1_logistics_demo): pin the
+        # pelvis with an MuJoCo <equality><weld> in mac-side scene.xml.
+        # See PELVIS_WELD_PATCH.md at the repo root. Locomotion proper
+        # (Faza 1.3) requires either: (a) custom RL policy retrained with
+        # arm-force domain randomization, or (b) whole-body MPC. Both are
+        # out of scope for arm-tasks phases.
+
         # Real arm action servers, talking to the MuJoCo bridge on /lowcmd.
         Node(package='g1_courier_arm_skills', executable='pick_action_server',
              name='pick_action_server',

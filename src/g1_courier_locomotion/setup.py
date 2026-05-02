@@ -1,3 +1,5 @@
+import os
+from glob import glob
 from setuptools import find_packages, setup
 
 package_name = 'g1_courier_locomotion'
@@ -10,6 +12,10 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'config'),
+            glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'policies'),
+            glob('policies/*.pt')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -21,6 +27,7 @@ setup(
     entry_points={
         'console_scripts': [
             'walking_controller_node = g1_courier_locomotion.walking_controller_node:main',
+            'walking_policy_node = g1_courier_locomotion.walking_policy_node:main',
         ],
     },
 )
