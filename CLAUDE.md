@@ -48,7 +48,7 @@ Przeczytaj w tej kolejności:
 | `sim_lidar_publisher_node` (LiDAR fixture, ray-cast vs odom) | ✅ |
 | AprilTag tagi + kamera RGB w `unitree_mujoco` scene XML (Faza 1.1) | ❌ mac side, edycja scene_29dof.xml |
 | Real LiDAR sensor w `unitree_mujoco` scene XML (Faza 1.2) | ❌ mac side, rangefinder array |
-| **Pelvis weld pin** (sim-only, dla 1.0..1.2) | ❌ wymaga edycji mac scene.xml — patch w `PELVIS_WELD_PATCH.md`. Po dodaniu robot stoi jak posąg, arm tasks działają bez walking controllera. Wzorowane na `g1_logistics_demo`. |
+| **Pelvis weld pin** (sim-only, dla 1.0..1.2) | ✅ mac scene.xml zedytowany (anchor mocap + `<equality><weld>` + `<option integrator="implicitfast"/>`). Robot stoi prosto (quat=identity, accel=(0,0,9.81)). Pełen phase1_smoke cykl A↔B w 71 s, 4 real arm seq (pick/place) bez wirgania, drugi cykl auto-restart. Wzorowane na `g1_logistics_demo`. |
 | **Walking controller** (`/cmd_vel` → leg motors), Faza 1.3 | ❌ **brama dla 1.4–1.6**; oba α (per-joint PD) i β (pretrained RL policy z unitree_rl_gym) **zawiodły** — α nie ma gravity feedforward, β nie była trenowana przeciwko external arm forces (P0→P6 arm motion = 20+ Nm na pelvis = poza distribution policy). Wymaga retreningu RL z arm-force domain randomization, albo whole-body MPC. Kod `g1_courier_locomotion/walking_*_node.py` zachowany jako wireup. Aktualnie 1.0..1.2 używają pelvis weld pin'a w scene.xml zamiast walking. |
 | Mapa z LiDAR `slam_toolbox` w MuJoCo (Faza 1.4) | ❌ wymaga 1.2 + 1.3 |
 | AMCL + nav2 real `navigate_to_pose` (Faza 1.5) | ❌ wymaga 1.4 |
