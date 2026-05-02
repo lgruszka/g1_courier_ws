@@ -32,6 +32,12 @@ class ArmControllerConfig:
     low_state_timeout_s: float = 5.0
     body_velocity_threshold_mps: float = 0.02
     body_velocity_settle_s: float = 0.3
+    # Sim-only escape hatch. When True, _publish_pose sets motor_cmd[i].mode=99
+    # for arm joints. The patched unitree_mujoco bridge interprets that as
+    # "snap data.qpos[i] directly, bypass PD". Effect: smooth motion without
+    # PD oscillation against the welded pelvis. On the real robot keep
+    # kinematic_mode=False — real motor firmware does not understand mode=99.
+    kinematic_mode: bool = False
 
 
 class ArmSkillAborted(RuntimeError):
@@ -151,8 +157,14 @@ class ArmController:
             if elapsed >= duration_s:
                 break
             ratio = max(0.0, min(1.0, elapsed / duration_s))
-            pose = [(1.0 - ratio) * a + ratio * b for a, b in zip(from_pose, to_pose)]
-            weight = (1.0 - ratio) * weight_start + ratio * weight_end
+            # Smoothstep `3t^2 - 2t^3`: zero derivatives at both ends, so
+            # joint velocities ramp up and down smoothly across waypoint
+            # boundaries instead of jumping. Linear blends caused visible
+            # jerks in MuJoCo at every stage transition.
+            smooth_ratio = ratio * ratio * (3.0 - 2.0 * ratio)
+            pose = [(1.0 - smooth_ratio) * a + smooth_ratio * b
+                    for a, b in zip(from_pose, to_pose)]
+            weight = (1.0 - smooth_ratio) * weight_start + smooth_ratio * weight_end
             self._publish_pose(pose, weight=weight)
             time.sleep(self._cfg.control_dt_s)
         self._publish_pose(to_pose, weight=weight_end)
@@ -166,6 +178,7 @@ class ArmController:
 
         cmd = self._LowCmd()
         cmd.motor_cmd[ARM_ENABLE_JOINT].q = float(weight)
+        kinematic = bool(self._cfg.kinematic_mode)
         for idx, joint in enumerate(ARM_JOINTS):
             m = cmd.motor_cmd[joint]
             m.tau = 0.0
@@ -173,6 +186,8 @@ class ArmController:
             m.dq = 0.0
             m.kp = self._cfg.kp
             m.kd = self._cfg.kd
+            if kinematic:
+                m.mode = 99   # sim-only sentinel — patched bridge writes qpos directly
         cmd.crc = self._crc.Crc(cmd)
         self._publisher.Write(cmd)
 

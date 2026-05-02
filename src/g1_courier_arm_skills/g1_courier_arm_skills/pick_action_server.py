@@ -30,11 +30,14 @@ class PickActionServer(Node):
         # depends on whatever pose the fallen-over robot is currently in
         # rather than on grasping a real parcel.
         self.declare_parameter('require_grasp_verified', True)
+        # Sim-only — see ArmControllerConfig.kinematic_mode docstring.
+        self.declare_parameter('kinematic_mode', False)
 
         cfg = ArmControllerConfig(
             control_dt_s=float(self.get_parameter('control_dt_s').value),
             kp=float(self.get_parameter('kp').value),
             kd=float(self.get_parameter('kd').value),
+            kinematic_mode=bool(self.get_parameter('kinematic_mode').value),
         )
         self._bundle = ArmRosBundle(
             self,

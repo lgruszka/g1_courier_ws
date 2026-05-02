@@ -79,6 +79,15 @@ def generate_launch_description() -> LaunchDescription:
                  'arm_sdk_topic': '/lowcmd',
                  'lowstate_topic': '/lowstate',
                  'require_grasp_verified': False,
+                 # Sim-only: bump publish rate to 200 Hz so the kinematic
+                 # writes (mode=99 in motor_cmd) keep the qpos stream
+                 # tight under the smoothstep trajectory.
+                 'control_dt_s': 0.005,
+                 # Sim-only escape hatch: tells the patched mac bridge to
+                 # set data.qpos[arm_joints] directly instead of running
+                 # PD via data.ctrl. Mirrors g1_logistics_demo's
+                 # kinematic_mode = True. Keep False on the real robot.
+                 'kinematic_mode': True,
              }]),
         Node(package='g1_courier_arm_skills', executable='place_action_server',
              name='place_action_server',
@@ -86,6 +95,9 @@ def generate_launch_description() -> LaunchDescription:
                  'arm_sdk_topic': '/lowcmd',
                  'lowstate_topic': '/lowstate',
                  'require_release_verified': False,
+                 # Sim-only — see pick_action_server above for rationale.
+                 'control_dt_s': 0.005,
+                 'kinematic_mode': True,
              }]),
 
         # Fake nav and dock (no nav2 / AprilTag / line-fit yet).
