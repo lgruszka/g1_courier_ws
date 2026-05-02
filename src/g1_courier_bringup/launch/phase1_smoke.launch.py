@@ -5,21 +5,27 @@ reach this one over DDS. In our setup that is the macOS host on the
 Parallels Shared Network (10.211.55.2 ↔ 10.211.55.11), publishing /lowstate
 and subscribing /lowcmd. See memory/project_macos_mujoco_bridge.md.
 
-Differences from phase0:
-  - sim_lowstate_publisher_node REMOVED (the MuJoCo bridge supplies /lowstate)
-  - fake_pick_action_server REPLACED by REAL pick_action_server with
-      arm_sdk_topic:=/lowcmd  (mac MuJoCo subscribes there, not /arm_sdk)
-      require_grasp_verified:=false  (tau_est is unreliable in MuJoCo
-      because the unbalanced bipedal robot falls over and gravity acts
-      sideways on the arms — see CLAUDE.md "Najczęstsze problemy")
-  - fake_place_action_server REPLACED analogously, require_release_verified:=false
-  - retreat is REAL retreat_action_server (drives /cmd_vel_retreat ->
-    arbiter -> /cmd_vel -> sim_cmd_vel_bridge integrates pose backward)
-  - navigate / dock stay fake (no nav2/AprilTag yet)
+Sim-only knobs versus the real-robot path (courier_full.launch.py):
+  - arm_sdk_topic:=/lowcmd  (real default: /arm_sdk via firmware)
+  - require_grasp_verified:=False, require_release_verified:=False
+    (real τ_est detection is meaningful; MuJoCo τ_est here mirrors the
+    welded-pelvis pose configuration, not actual parcel weight)
+  - kinematic_mode:=True   (real default False = torque PD on motors;
+    in sim our patched mac bridge interprets motor_cmd[i].mode==99 as
+    "snap data.qpos[i] directly", giving fluid arm motion equivalent
+    to g1_logistics_demo's kinematic_mode = True)
+  - control_dt_s:=0.005    (200 Hz publish; real default 0.02 = 50 Hz)
 
-Expected: same A→B→A cycle as phase0, but each pickup_at_X / transfer_to_X
-takes longer because the arm sequence runs for real (~14s pick, ~9s place
-visible in MuJoCo viewer on macOS).
+Differences from phase0:
+  - sim_lowstate_publisher_node REMOVED (mac MuJoCo bridge supplies /lowstate)
+  - fake_pick / fake_place REPLACED by REAL action servers with sim-only
+    parameters listed above
+  - retreat is REAL retreat_action_server
+  - navigate / dock stay fake — Faza 1.1 (AprilTag in scene + camera)
+    and Faza 1.5 (nav2 + AMCL on a real LiDAR map) replace these.
+
+Expected: full A↔B cycle in ~70 s, smooth pick/place visible in the mac
+MuJoCo viewer, BT auto-restarts cycles via tick_tock.
 """
 from __future__ import annotations
 
@@ -59,18 +65,10 @@ def generate_launch_description() -> LaunchDescription:
              name='cmd_vel_arbiter',
              parameters=[os.path.join(safety_share, 'config', 'safety.yaml')]),
 
-        # NOTE: walking_policy_node is NOT launched. The pretrained RL
-        # policy from unitree_rl_gym was tested and proved unsuitable for
-        # our use case — it was trained for a free-standing walking task
-        # without external arm forces, and our pick/place sequences (heavy
-        # P0..P6 arm motion, ~5 kg per arm) push the CoM into states the
-        # policy never saw. Result: violent oscillation + falls.
-        # Strategy taken instead (mirrors g1_logistics_demo): pin the
-        # pelvis with an MuJoCo <equality><weld> in mac-side scene.xml.
-        # See PELVIS_WELD_PATCH.md at the repo root. Locomotion proper
-        # (Faza 1.3) requires either: (a) custom RL policy retrained with
-        # arm-force domain randomization, or (b) whole-body MPC. Both are
-        # out of scope for arm-tasks phases.
+        # NOTE: no walking controller. Locomotion in sim is replaced by a
+        # pelvis weld pin in mac-side scene.xml (see PELVIS_WELD_PATCH.md).
+        # Real walking (Faza 1.3) is a separate sub-phase requiring either
+        # custom RL retraining with arm-force disturbance, or whole-body MPC.
 
         # Real arm action servers, talking to the MuJoCo bridge on /lowcmd.
         Node(package='g1_courier_arm_skills', executable='pick_action_server',
