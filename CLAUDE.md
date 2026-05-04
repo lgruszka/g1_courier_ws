@@ -28,7 +28,7 @@ Przeczytaj w tej kolejności:
 | Definicje `g1_courier_msgs` (action/srv/msg) | ✅ pełne |
 | Arm controller (parametric, CRC, weight ramping, grasp verifier) | ✅ pełne, IK hook to-do |
 | `pick_box` / `place_box` action servery | ✅ pełne |
-| `dock_to_table` action server, tryb APRILTAG | 🟡 servo loop OK, ale `_extract_tag_residual` polega na `det.pose.pose.pose.position` którego `apriltag_msgs/AprilTagDetection` z `ros-jazzy-apriltag-ros` NIE ma (tylko homography + corners). Pełna integracja wymaga (a) TF z osobnego pose estimation node'a, lub (b) solvePnP w naszym kodzie z homography + camera_info — robione w Fazie 1.1 |
+| `dock_to_table` action server, tryb APRILTAG | ✅ pełne; cv2.solvePnPGeneric + IPPE_SQUARE z 2-fold ambiguity disambiguation + flip-fallback dla degeneracji facing-on. Fallback intrinsics z `apriltag.{fx,fy,cx,cy}` w docking.yaml. Walidowane w MuJoCo z mac kinematic mocap (dock A zbiega ~7 s do tolerancji 3 cm/0.05 rad). Patrz `docs/phases/phase_1_1.md` |
 | `dock_to_table` tryb LIDAR_LINE | ✅ RANSAC line fit + perpendicular alignment, walidowane na fixture (1.8 mm xy / 1.7° yaw convergence) |
 | `dock_to_table` tryb AMCL_ONLY | ✅ pełne (trywialne) |
 | `cmd_vel_arbiter` z carry mode + freeze + e-stop | ✅ pełne |
@@ -44,12 +44,13 @@ Przeczytaj w tej kolejności:
 | Integracja `unitree_mujoco` (Faza 1) — communication path | ✅ DDS bridge zwalidowany w obie strony |
 | Real `pick_action_server` zwalidowany na MuJoCo (bridge) | ✅ pełna sekwencja P0→P6 + grasp_verifier OK |
 | Real `place_action_server` zwalidowany na MuJoCo (bridge) | ✅ pełna sekwencja P5→ZERO + handoff_to_fsm OK |
-| `phase1_smoke.launch.py` (mission BT z real arm + retreat + fake nav/dock) | ✅ pełen cykl A↔B z 4 real arm + 2 real retreat (~70 s) |
+| `phase1_smoke.launch.py` (mission BT z real arm + retreat + real dock A) | ✅ pełen cykl A↔B z real arm + real dock APRILTAG na A + real retreat. Dock B w trybie diagnostycznym `amcl_only` do czasu kinematic nav (Faza 1.1+) |
 | `sim_lidar_publisher_node` (LiDAR fixture, ray-cast vs odom) | ✅ |
-| AprilTag tagi + kamera RGB w `unitree_mujoco` scene XML (Faza 1.1) | ❌ mac side, edycja scene_29dof.xml |
+| AprilTag tagi + kamera RGB w `unitree_mujoco` scene XML (Faza 1.1) | ✅ tag36h11 id5 (biurko A 1.5 m) i id7 (biurko B 4 m), tag size 0.16 m, head_cam fovy=60° 640×480, pupil_apriltags detector publikuje `rt/detections` ~10–15 Hz |
 | Real LiDAR sensor w `unitree_mujoco` scene XML (Faza 1.2) | ❌ mac side, rangefinder array |
 | **Pelvis weld pin** (sim-only, dla 1.0..1.2) | ✅ mac scene.xml zedytowany (anchor mocap + `<equality><weld>` + `<option integrator="implicitfast"/>`). Robot stoi prosto (quat=identity, accel=(0,0,9.81)). |
 | **Kinematic mode dla armów** (sim-only) | ✅ mac `unitree_sdk2py_bridge.py` rozpoznaje `motor_cmd[i].mode == 99` i wpisuje `data.qpos[i]` directly zamiast PD-via-torque. arm_controller wpisuje sentinel gdy `kinematic_mode: True` w configu. Wzorowane na `g1_logistics_demo`'s `kinematic_mode = True`. Ramiona poruszają się płynnie, bez drgań typowych dla PD-via-DDS. Domyślnie `False` na realnym robocie. |
+| **Kinematic mocap movement** (sim-only, Faza 1.1) | ✅ mac bridge subskrybuje `rt/cmd_vel`, integruje `pelvis_anchor` `mocap_pos` (rotacja yaw → world frame velocity) i `mocap_quat` co physics step (1 ms). Robot "ślizga się" zgodnie z `/cmd_vel` mimo welded pelvis. Sim-only — usuwa się gdy 1.3 da prawdziwego chodu. |
 | **Smoothstep trajectory** w arm_controller | ✅ liniowa interpolacja zastąpiona `3t² − 2t³` (zerowe pochodne na końcach waypointów, brak skoków velocity między stages). Działa też na realu — uniwersalnie lepsze. |
 | **Walking controller** (`/cmd_vel` → leg motors), Faza 1.3 | ❌ **brama dla 1.4–1.6**. W obecnej Fazie 1.0..1.2 omijane przez pelvis weld pin (sim-only). Faza 1.3 wymaga osobnego sub-projektu — patrz "Sub-fazy Fazy 1" niżej. |
 | Mapa z LiDAR `slam_toolbox` w MuJoCo (Faza 1.4) | ❌ wymaga 1.2 + 1.3 |
@@ -83,7 +84,8 @@ Zamiast jednego symulatora trzy fazy o rosnącej wierności i koszcie, napędzan
 Każda kolejna sub-faza wymaga poprzednich. Walking controller (1.3) jest **bramą** — bez niego nav2/dock APRILTAG/mapowanie nie ma jak realnie sterować robotem w MuJoCo.
 
 - **1.0 — arm + dock LIDAR_LINE** (zrobione): `pick_action_server`, `place_action_server`, `dock_action_server` MODE_LIDAR_LINE z RANSAC, mission BT cycle z fake nav/dock + real arm + real retreat.
-- **1.1 — AprilTag w scene + dock APRILTAG**: dorobić tag textury w scene XML, włączyć kamerę RGB, podpiąć `apriltag_ros` na detekcje, real `dock_action_server` MODE_APRILTAG.
+- **1.1 — AprilTag w scene + dock APRILTAG** (zrobione): tag36h11 textury na biurkach A/B, kamera `head_cam` w torso, mac bridge robi detection przez `pupil_apriltags` i publikuje `rt/detections`. Linux `dock_action_server` MODE_APRILTAG używa cv2.solvePnPGeneric. Plus mac kinematic mocap movement integruje `/cmd_vel` w `pelvis_anchor.mocap_pos`. Pełen cykl A↔B przechodzi z dock A real + dock B `amcl_only` (diagnostic do czasu kinematic nav). Patrz `docs/phases/phase_1_1.md`.
+- **1.1+ — kinematic nav** (planowane): zastąpić `fake_navigate_proxy` realnym P-controllerem do target waypoint, `/cmd_vel_nav` → arbiter. Robot fizycznie jeździ A↔B, dock B wraca do trybu APRILTAG (tag7).
 - **1.2 — LiDAR sensor w scene XML + `/scan`**: dodać rangefinder array w MuJoCo (Mid360 surrogate), bridge eksportuje LaserScan na DDS, dock LIDAR_LINE może chodzić na real LiDAR (zamiast `sim_lidar_publisher_node`).
 - **1.3 — walking controller** (`/cmd_vel` → motor commands na nogi): conditio sine qua non dla 1.4+. Próbowane ścieżki α i β **zawiodły dla naszego use case** i ich kod został usunięty żeby nie mylić — Faza 1.3 będzie czystym refaktorem od zera kiedy będzie czas:
   - α) **Standing PD + cmd_vel fakery**: per-joint PD bez gravity feedforward i bez whole-body coordination (CoM, GRF) nie utrzyma G1 — drobne błędy generują pełen moment, oscylacje, upadek.
@@ -223,6 +225,9 @@ Pełne zasady w `docs/ARCHITECTURE.md`. Najważniejsze, których nie wolno łama
 - **`unitree_sdk2py` po stronie publishera nie wpisuje type hash** — `[WARN] rmw_cyclonedds_cpp: Failed to parse type hash for topic 'rt/lowstate' from USER_DATA '(null)'`. Kosmetyka. Type matching idzie po nazwie typu i działa; brakuje tylko ROS2-specific extra integrity check.
 - **`unitree_sdk2py` nie inkrementuje pola `LowState.tick`** — zostaje 0 cały czas. Nikt z naszego kodu tego nie czyta, więc niegroźne. Pamiętaj jeśli kiedykolwiek dorobimy heartbeat-watchdog opartego o tick.
 - **Isaac ROS2 bridge (Faza 2) nie publikuje** — sprawdź `ROS_DOMAIN_ID` (zmienna środowiskowa przed startem Isaac) i tunelowanie sieciowe jeśli na cloud.
+- **`apriltag_msgs/AprilTagDetection.corners` przychodzi jako "deterministic garbage"** — `centre` sensowne (np. 320, 240), ale `corners[*].x` zawiera zera lub `homography[8] != 1.0`. To IDL mismatch między mac CDR i Linux ros-jazzy: kolejność pól lub typ `Point` (float32 vs float64). **Fix po stronie macowej**: regenerować Python bindings z **dokładnie tego** `.idl` z `/opt/ros/jazzy/share/apriltag_msgs/msg/` (skopiować przez Parallels Shared Folders). Type hash warningi `Failed to parse type hash ... USER_DATA '(null)'` są kosmetyczne i nie odróżniają zdrowej od popsutej deserializacji — diagnoza tylko po wartościach.
+- **Dock APRILTAG zwraca timeout, robot ustawia się "pod skosem"** — bug w znaku `dyaw` w `_extract_tag_residual`. Każda perturbacja yaw jest wzmacniana zamiast tłumiona. Poprawna formuła: `dyaw = math.atan2(R[0,2], -R[2,2])` (semantyka: dodatnie = robot ma się obrócić CCW żeby skorygować). Zweryfikuj standalone testem na 4 scenariuszach (facing-on, drift L/R, tag rotated L/R) — dla każdego znak ma malować residual do zera.
+- **`SOLVEPNP_IPPE_SQUARE` zwraca rozwiązanie z `R[2,2] > 0` w idealnym facing-on** — degeneracyjny przypadek planar markera. Dwustopniowa disambiguacja: najpierw weź kandydata z `R[2,2] < 0`; jeśli żaden, weź pierwszego i zastosuj `R = R @ diag(1, -1, -1)` (180° flip wokół tag's X). To wymusza poprawny znak normalu.
 
 ## Linki referencyjne
 

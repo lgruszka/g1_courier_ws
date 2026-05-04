@@ -24,10 +24,16 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.action.server import ServerGoalHandle
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 
 from geometry_msgs.msg import PoseStamped, Twist
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import CameraInfo, LaserScan
 
 from g1_courier_msgs.action import DockToTable
 
@@ -37,6 +43,13 @@ try:
 except ImportError:
     AprilTagDetectionArray = None  # type: ignore[assignment]
     APRILTAG_OK = False
+
+try:
+    import cv2
+    import numpy as np
+    CV2_OK = True
+except ImportError:
+    CV2_OK = False
 
 
 # ---------- aligners ----------
@@ -196,6 +209,14 @@ class DockActionServer(Node):
         self.declare_parameter('apriltag.max_vy', 0.10)
         self.declare_parameter('apriltag.max_vyaw', 0.4)
         self.declare_parameter('apriltag.target_distance_m', 0.55)
+        self.declare_parameter('apriltag.tag_size_m', 0.16)
+        self.declare_parameter('camera_info_topic', '/camera_info')
+        # Fallback intrinsics — used until a CameraInfo publisher appears.
+        # Set fx<=0 to disable and require CameraInfo before any PnP attempt.
+        self.declare_parameter('apriltag.fx', 0.0)
+        self.declare_parameter('apriltag.fy', 0.0)
+        self.declare_parameter('apriltag.cx', 0.0)
+        self.declare_parameter('apriltag.cy', 0.0)
         self.declare_parameter('lidar.target_distance_m', 0.55)
         self.declare_parameter('lidar.kp_xy', 0.6)
         self.declare_parameter('lidar.kp_yaw', 1.0)
@@ -208,14 +229,42 @@ class DockActionServer(Node):
 
         self._cmd_pub = self.create_publisher(Twist, cmd_topic, 10)
 
+        self._tag_lock = threading.Lock()
+        self._latest_tags = None
+        self._camera_K = None
+
         if APRILTAG_OK:
             self._tag_sub = self.create_subscription(
                 AprilTagDetectionArray,
                 str(self.get_parameter('apriltag_topic').value),
                 self._on_tag, qos_profile_sensor_data,
             )
+            # CameraInfo is conventionally latched: the publisher publishes
+            # once with TRANSIENT_LOCAL, late subscribers still receive it.
+            # Match with reliable + transient_local on our side.
+            cam_info_qos = QoSProfile(
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                history=HistoryPolicy.KEEP_LAST,
+                depth=1,
+            )
+            self._cam_info_sub = self.create_subscription(
+                CameraInfo,
+                str(self.get_parameter('camera_info_topic').value),
+                self._on_camera_info, cam_info_qos,
+            )
+            if not CV2_OK:
+                self.get_logger().warn(
+                    'cv2/numpy not available - APRILTAG mode pose extraction disabled.'
+                )
+            elif self._seed_intrinsics_from_params():
+                self.get_logger().info(
+                    'using fallback pinhole intrinsics from apriltag.{fx,fy,cx,cy}; '
+                    'CameraInfo will override when received.'
+                )
         else:
             self._tag_sub = None
+            self._cam_info_sub = None
             self.get_logger().warn('apriltag_msgs not available - APRILTAG mode disabled.')
 
         self._scan_sub = self.create_subscription(
@@ -223,8 +272,6 @@ class DockActionServer(Node):
             self._on_scan, qos_profile_sensor_data,
         )
 
-        self._tag_lock = threading.Lock()
-        self._latest_tags = None
         self._scan_lock = threading.Lock()
         self._latest_scan: Optional[LaserScan] = None
 
@@ -243,6 +290,28 @@ class DockActionServer(Node):
     def _on_tag(self, msg) -> None:
         with self._tag_lock:
             self._latest_tags = msg
+
+    def _on_camera_info(self, msg: CameraInfo) -> None:
+        if not CV2_OK:
+            return
+        K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
+        with self._tag_lock:
+            self._camera_K = K
+
+    def _seed_intrinsics_from_params(self) -> bool:
+        if not CV2_OK:
+            return False
+        fx = float(self.get_parameter('apriltag.fx').value)
+        fy = float(self.get_parameter('apriltag.fy').value)
+        cx = float(self.get_parameter('apriltag.cx').value)
+        cy = float(self.get_parameter('apriltag.cy').value)
+        if fx <= 0.0 or fy <= 0.0:
+            return False
+        K = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]],
+                     dtype=np.float64)
+        with self._tag_lock:
+            self._camera_K = K
+        return True
 
     def _on_scan(self, msg: LaserScan) -> None:
         with self._scan_lock:
@@ -348,39 +417,92 @@ class DockActionServer(Node):
             time.sleep(period)
 
     def _extract_tag_residual(self, tag_id: int, goal_pose: PoseStamped):
-        """Return (dx, dy, dyaw) of robot vs goal pose in tag frame.
+        """Return (dx, dy, dyaw) in robot frame, or (None, None, None) if no fix.
 
-        TODO: full implementation needs to (a) read the tag pose from
-        AprilTagDetectionArray (or a dedicated tf frame), (b) transform `goal_pose`
-        from the tag frame into base_link, (c) compute the residual.
+        Pipeline:
+          1. Pull the latest detection matching `tag_id` (4 image corners).
+          2. solvePnP against a known-size square in tag frame to get tvec, rvec
+             of the tag in OpenCV camera optical frame (X right, Y down, Z fwd).
+          3. Map to REP-103 base_link assuming the camera is rigidly mounted
+             facing forward (camera Z = robot X, camera X = -robot Y).
+             For the welded-pelvis sim this rigid identity holds; on the real
+             robot replace with a tf2 lookup of camera_optical_frame -> base_link.
+          4. dx is forward overshoot vs target_distance, dy is lateral, dyaw is
+             rotation about robot Z extracted from the tag's normal direction.
 
-        For the starter we use the simplification that the camera frame is the
-        robot frame and that `goal_pose` is given in the tag frame as
-        (target_x_in_tag = -target_distance, 0, 0) facing the tag - we read
-        `pose.position` from the first matching detection and treat its
-        Z (forward) as distance and X (lateral) as side error.
+        `goal_pose` is currently unused: the per-table predock target lives
+        in waypoints.yaml and the residual is always relative to "centred on
+        the tag at target_distance facing it". When we add multi-pose docks
+        (e.g. side approach) we'll reintroduce goal_pose here.
         """
+        if not CV2_OK:
+            return (None, None, None)
         with self._tag_lock:
             msg = self._latest_tags
-        if msg is None:
+            K = self._camera_K
+        if msg is None or K is None:
             return (None, None, None)
+        target_distance = float(self.get_parameter('apriltag.target_distance_m').value)
+        tag_size_m = float(self.get_parameter('apriltag.tag_size_m').value)
+        s = tag_size_m / 2.0
+        # OpenCV SOLVEPNP_IPPE_SQUARE requires obj_pts in TL,TR,BR,BL order
+        # within a tag frame where +X is right and +Y is up. apriltag_msgs
+        # publishes corners CCW starting from the tag's BL — so we reorder
+        # corners[3,2,1,0] to match.
+        obj_pts = np.array([
+            [-s,  s, 0.0],   # TL
+            [ s,  s, 0.0],   # TR
+            [ s, -s, 0.0],   # BR
+            [-s, -s, 0.0],   # BL
+        ], dtype=np.float64)
         for det in getattr(msg, 'detections', []):
             if int(getattr(det, 'id', -1)) != int(tag_id):
                 continue
-            # NOTE: this assumes the apriltag node publishes pose-bearing detections.
-            # If it only publishes pixel centers, switch to /tf lookups.
-            try:
-                pos = det.pose.pose.pose.position  # apriltag_ros standard nesting
-            except AttributeError:
+            corners = getattr(det, 'corners', None)
+            if corners is None or len(corners) != 4:
                 return (None, None, None)
-            target = goal_pose.pose.position
-            # robot_to_target in tag frame:
-            dx_tag = target.x - pos.x
-            dy_tag = target.y - pos.y
-            # treat tag z (forward in camera) as robot x; tag x (lateral) as robot -y
-            dx_robot = -dx_tag      # forward correction
-            dy_robot = -dy_tag      # lateral correction
-            dyaw = 0.0              # TODO: full yaw from quaternion
+            img_pts = np.array([
+                (float(corners[3].x), float(corners[3].y)),  # TL
+                (float(corners[2].x), float(corners[2].y)),  # TR
+                (float(corners[1].x), float(corners[1].y)),  # BR
+                (float(corners[0].x), float(corners[0].y)),  # BL
+            ], dtype=np.float64)
+            # IPPE_SQUARE has a 2-fold ambiguity for planar markers (the tag's
+            # normal can be flipped). Get both candidates and pick the one
+            # where the tag faces back toward the camera (its local +Z lies
+            # in the -Z_camera half-space, i.e. R[2,2] < 0). Without this we
+            # see a 180° dyaw at the facing-on singular point.
+            n_sols, rvecs, tvecs, _ = cv2.solvePnPGeneric(
+                obj_pts, img_pts, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE,
+            )
+            if n_sols == 0:
+                return (None, None, None)
+            rvec, tvec, R = None, None, None
+            for cand_rvec, cand_tvec in zip(rvecs, tvecs):
+                cand_R, _ = cv2.Rodrigues(cand_rvec)
+                if cand_R[2, 2] < 0:
+                    rvec, tvec, R = cand_rvec, cand_tvec, cand_R
+                    break
+            if R is None:
+                # Both IPPE candidates picked the "tag faces away" branch —
+                # happens at the facing-on singular point. Force-flip 180°
+                # about the tag's X axis so the outward normal points back
+                # toward the camera. tvec is unchanged (same physical pose).
+                rvec, tvec = rvecs[0], tvecs[0]
+                R, _ = cv2.Rodrigues(rvec)
+                R = R @ np.diag([1.0, -1.0, -1.0])
+            x_c, y_c, z_c = (float(v) for v in tvec.flatten())
+            dx_robot = z_c - target_distance
+            dy_robot = -x_c
+            # Tag's local +Z (out-of-plane normal) in camera frame is R[:, 2].
+            # When the tag faces the camera squarely, that vector points back
+            # along -Z_cam, so R[2,2] ≈ -1. Yaw correction (sign convention:
+            # positive = robot needs to rotate CCW) is computed so that:
+            #   - tag rotated CCW relative to camera ⇒ dyaw > 0 (rotate to align)
+            #   - robot drifted CCW with tag fixed   ⇒ dyaw < 0 (rotate back)
+            # Both reduce to atan2(R[0,2], -R[2,2]) given R[2,2]<0 after
+            # disambiguation above.
+            dyaw = math.atan2(R[0, 2], -R[2, 2])
             return (dx_robot, dy_robot, dyaw)
         return (None, None, None)
 

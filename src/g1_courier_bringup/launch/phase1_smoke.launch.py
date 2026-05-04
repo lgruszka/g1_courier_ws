@@ -1,9 +1,14 @@
-"""Phase 1 smoke launch — mission BT with REAL pick/place against MuJoCo.
+"""Phase 1 smoke launch — mission BT with REAL pick/place + REAL dock.
 
 PREREQUISITE: unitree_mujoco must be running on a separate host that can
 reach this one over DDS. In our setup that is the macOS host on the
 Parallels Shared Network (10.211.55.2 ↔ 10.211.55.11), publishing /lowstate
 and subscribing /lowcmd. See memory/project_macos_mujoco_bridge.md.
+
+The mac side additionally publishes /detections (apriltag_msgs) and
+/camera_info (sensor_msgs) sourced from a head-mounted MuJoCo camera that
+sees two table bodies with tag36h11 ids 5 and 7 textured on their fronts.
+See PELVIS_WELD_PATCH.md / Faza 1.1 plan for the scene XML deltas.
 
 Sim-only knobs versus the real-robot path (courier_full.launch.py):
   - arm_sdk_topic:=/lowcmd  (real default: /arm_sdk via firmware)
@@ -18,13 +23,14 @@ Sim-only knobs versus the real-robot path (courier_full.launch.py):
 
 Differences from phase0:
   - sim_lowstate_publisher_node REMOVED (mac MuJoCo bridge supplies /lowstate)
-  - fake_pick / fake_place REPLACED by REAL action servers with sim-only
-    parameters listed above
+  - fake_pick / fake_place REPLACED by REAL action servers (sim-only knobs)
+  - fake_dock REPLACED by REAL dock_action_server
+      * MODE_APRILTAG (table A): /detections + /camera_info from mac bridge
+      * MODE_LIDAR_LINE (table B): /scan from sim_lidar_publisher_node
   - retreat is REAL retreat_action_server
-  - navigate / dock stay fake — Faza 1.1 (AprilTag in scene + camera)
-    and Faza 1.5 (nav2 + AMCL on a real LiDAR map) replace these.
+  - navigate stays fake — Faza 1.5 (nav2 + AMCL on a real LiDAR map) replaces.
 
-Expected: full A↔B cycle in ~70 s, smooth pick/place visible in the mac
+Expected: full A↔B cycle in ~80 s, smooth pick/place visible in the mac
 MuJoCo viewer, BT auto-restarts cycles via tick_tock.
 """
 from __future__ import annotations
@@ -53,6 +59,7 @@ def _fake(executable: str) -> Node:
 
 def generate_launch_description() -> LaunchDescription:
     safety_share = get_package_share_directory('g1_courier_safety')
+    docking_share = get_package_share_directory('g1_courier_docking')
 
     return LaunchDescription([
         # Sim base only — kinematic TF + /odom for nav-related behaviors.
@@ -98,9 +105,19 @@ def generate_launch_description() -> LaunchDescription:
                  'kinematic_mode': True,
              }]),
 
-        # Fake nav and dock (no nav2 / AprilTag / line-fit yet).
+        # Fake nav (nav2 lands in Faza 1.5).
         _fake('fake_navigate_proxy'),
-        _fake('fake_dock_action_server'),
+
+        # Synthetic 2D scan for dock LIDAR_LINE on table B (no real LiDAR
+        # in mac scene yet — Faza 1.2).
+        Node(package='g1_courier_sim', executable='sim_lidar_publisher_node',
+             name='sim_lidar_publisher_node'),
+
+        # Real dock — APRILTAG on table A consumes mac /detections and
+        # /camera_info; LIDAR_LINE on table B consumes /scan above.
+        Node(package='g1_courier_docking', executable='dock_action_server',
+             name='dock_action_server',
+             parameters=[os.path.join(docking_share, 'config', 'docking.yaml')]),
 
         # Real retreat — open-loop backward drive on /cmd_vel_retreat.
         # Arbiter routes it to /cmd_vel; sim_cmd_vel_bridge integrates pose.

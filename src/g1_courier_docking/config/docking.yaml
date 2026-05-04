@@ -2,6 +2,7 @@ dock_action_server:
   ros__parameters:
     cmd_vel_topic: /cmd_vel_dock
     apriltag_topic: /detections
+    camera_info_topic: /camera_info
     scan_topic: /scan
     control_rate_hz: 20.0
     settle_samples: 5
@@ -12,6 +13,15 @@ dock_action_server:
     apriltag.max_vy: 0.10
     apriltag.max_vyaw: 0.4
     apriltag.target_distance_m: 0.55       # TODO_TUNE: pre-pick distance
+    apriltag.tag_size_m: 0.16              # full edge length, matches mac scene tag plate
+    # Fallback pinhole intrinsics used until mac side starts publishing
+    # rt/camera_info. Values match the mac head_cam (fovy=60°, 640x480):
+    # fx = fy = (H/2) / tan(fovy/2) = 240 / tan(30°) ≈ 415.69, cx=W/2, cy=H/2.
+    # Set apriltag.fx <= 0 to disable the fallback and require CameraInfo.
+    apriltag.fx: 415.69
+    apriltag.fy: 415.69
+    apriltag.cx: 320.0
+    apriltag.cy: 240.0
 
     lidar.target_distance_m: 0.55
     lidar.kp_xy: 0.6

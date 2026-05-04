@@ -13,6 +13,6 @@ tables:
     predock_x: 4.00
     predock_y: 0.00
     predock_yaw: 0.00
-    dock_mode: lidar_line   # camera occluded by carried parcel
+    dock_mode: amcl_only   # diagnostic: trivial mode while we don't yet have real nav driving the robot to B
     final_xy_tol_m: 0.06    # looser - place is more forgiving
     final_yaw_tol_rad: 0.07
