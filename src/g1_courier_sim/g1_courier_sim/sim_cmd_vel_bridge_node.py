@@ -54,6 +54,10 @@ class SimCmdVelBridge(Node):
         self.declare_parameter('map_to_odom_x', 0.0)
         self.declare_parameter('map_to_odom_y', 0.0)
         self.declare_parameter('map_to_odom_yaw', 0.0)
+        # Set False when running with a SLAM stack (slam_toolbox/AMCL) that
+        # publishes its own map->odom transform; otherwise the two static
+        # broadcasters fight on /tf_static and TF tree breaks.
+        self.declare_parameter('publish_map_to_odom', True)
 
         self._rate_hz = max(1.0, float(self.get_parameter('update_rate_hz').value))
         self._dt = 1.0 / self._rate_hz
@@ -83,11 +87,16 @@ class SimCmdVelBridge(Node):
             PoseWithCovarianceStamped, '/initialpose', self._on_initialpose, 10,
         )
 
-        self._publish_static_map_to_odom()
+        if bool(self.get_parameter('publish_map_to_odom').value):
+            self._publish_static_map_to_odom()
+            map_status = 'static map->odom published'
+        else:
+            map_status = 'map->odom delegated to SLAM stack'
         self.create_timer(self._dt, self._tick)
         self.get_logger().info(
             f'sim_cmd_vel_bridge ready @ {self._rate_hz:.0f} Hz, '
-            f'pose=({self._x:.2f}, {self._y:.2f}, {math.degrees(self._yaw):.1f}deg)'
+            f'pose=({self._x:.2f}, {self._y:.2f}, {math.degrees(self._yaw):.1f}deg), '
+            f'{map_status}'
         )
 
     # ---------- callbacks ----------
