@@ -103,12 +103,17 @@ class NavigateTo(_ActionBehaviour):
     action_name = '/courier/navigate_to_pose'
 
     def __init__(self, name: str, node: Node, *, frame_id: str, x: float, y: float, yaw: float,
-                 waypoint_name: str = '', timeout_s: float = 60.0):
+                 waypoint_name: str = '', timeout_s: float = 60.0,
+                 xy_tolerance_m: float = 0.0, yaw_tolerance_rad: float = 0.0):
         def build():
             g = NavigateToPose.Goal()
             g.target_pose = make_pose_stamped(frame_id, x, y, yaw)
             g.waypoint_name = waypoint_name or name
             g.timeout_s = float(timeout_s)
+            # 0 means "use the nav node's default tolerance" (per the .action
+            # contract). Pass-through values allow loose via-points.
+            g.xy_tolerance_m = float(xy_tolerance_m)
+            g.yaw_tolerance_rad = float(yaw_tolerance_rad)
             return g
         super().__init__(name, node, build)
 

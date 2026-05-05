@@ -24,11 +24,15 @@ Sim-only knobs versus the real-robot path (courier_full.launch.py):
 Differences from phase0:
   - sim_lowstate_publisher_node REMOVED (mac MuJoCo bridge supplies /lowstate)
   - fake_pick / fake_place REPLACED by REAL action servers (sim-only knobs)
-  - fake_dock REPLACED by REAL dock_action_server
-      * MODE_APRILTAG (table A): /detections + /camera_info from mac bridge
-      * MODE_LIDAR_LINE (table B): /scan from sim_lidar_publisher_node
+  - fake_dock REPLACED by REAL dock_action_server (MODE_APRILTAG on both
+    tables; tag5 on A, tag7 on B; fallback intrinsics from docking.yaml)
+  - fake_navigate REPLACED by REAL kinematic_nav_node — P-controller to the
+    target waypoint, publishes /cmd_vel_nav. Mac kinematic mocap integrates
+    /cmd_vel and slides the welded pelvis, so the robot physically moves
+    A<->B in MuJoCo.
   - retreat is REAL retreat_action_server
-  - navigate stays fake — Faza 1.5 (nav2 + AMCL on a real LiDAR map) replaces.
+  - sim_lidar_publisher_node still launched for the moment (idle since both
+    docks are APRILTAG); retired when Faza 1.2 adds a real LiDAR sensor.
 
 Expected: full A↔B cycle in ~80 s, smooth pick/place visible in the mac
 MuJoCo viewer, BT auto-restarts cycles via tick_tock.
@@ -105,16 +109,21 @@ def generate_launch_description() -> LaunchDescription:
                  'kinematic_mode': True,
              }]),
 
-        # Fake nav (nav2 lands in Faza 1.5).
-        _fake('fake_navigate_proxy'),
+        # Real kinematic nav — P-controller to target waypoint, /cmd_vel_nav.
+        # Mac kinematic mocap mirrors the integration so the robot physically
+        # moves between tables in MuJoCo. nav2 replaces this in Faza 1.5.
+        Node(package='g1_courier_sim', executable='kinematic_nav_node',
+             name='kinematic_nav_node'),
 
-        # Synthetic 2D scan for dock LIDAR_LINE on table B (no real LiDAR
-        # in mac scene yet — Faza 1.2).
+        # Synthetic 2D scan — currently idle because both dock modes use
+        # APRILTAG. Kept launched so a future test in MODE_LIDAR_LINE picks
+        # up a /scan without re-editing this launch file.
         Node(package='g1_courier_sim', executable='sim_lidar_publisher_node',
              name='sim_lidar_publisher_node'),
 
-        # Real dock — APRILTAG on table A consumes mac /detections and
-        # /camera_info; LIDAR_LINE on table B consumes /scan above.
+        # Real dock — MODE_APRILTAG on both tables. Mac /detections from
+        # head_cam carries tag5 (A) and tag7 (B); fallback intrinsics from
+        # docking.yaml until mac side starts publishing /camera_info.
         Node(package='g1_courier_docking', executable='dock_action_server',
              name='dock_action_server',
              parameters=[os.path.join(docking_share, 'config', 'docking.yaml')]),

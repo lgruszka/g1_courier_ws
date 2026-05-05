@@ -1,7 +1,13 @@
 tables:
+  # NOTE: predock_x is the world-frame target where kinematic_nav stops; the
+  # dock servo then converges from there to target_distance_m (0.55) from
+  # the tag. mac scene puts table centres at x={1.5, 4.0} and the tag plates
+  # on the front face — measured tag world-x via PnP is ~{1.24, 3.74}, so
+  # predock at ~0.74 m before the tag leaves dock servo a comfortable
+  # ~0.2 m margin and keeps the tag inside head_cam FoV.
   table_a:
     apriltag_id: 5
-    predock_x: 1.50      # TODO_TUNE: in 'map' frame, ~0.8 m in front of pick spot
+    predock_x: 0.50
     predock_y: 0.00
     predock_yaw: 0.00    # facing the table
     dock_mode: apriltag
@@ -10,9 +16,13 @@ tables:
 
   table_b:
     apriltag_id: 7
-    predock_x: 4.00
+    predock_x: 3.00
     predock_y: 0.00
     predock_yaw: 0.00
-    dock_mode: amcl_only   # diagnostic: trivial mode while we don't yet have real nav driving the robot to B
-    final_xy_tol_m: 0.06    # looser - place is more forgiving
+    # Place at table B doesn't need camera-precise docking — robot trusts
+    # nav to land near the table and arms drop the parcel from there.
+    # Plus head_cam is occluded by the carried parcel anyway. Real LIDAR_LINE
+    # comes in Faza 1.2 once the mac scene XML grows a rangefinder.
+    dock_mode: amcl_only
+    final_xy_tol_m: 0.06    # ignored in amcl_only mode but kept for symmetry
     final_yaw_tol_rad: 0.07
