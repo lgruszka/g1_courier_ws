@@ -19,10 +19,11 @@ tables:
     predock_x: 3.00
     predock_y: 0.00
     predock_yaw: 0.00
-    # Place at table B doesn't need camera-precise docking — robot trusts
-    # nav to land near the table and arms drop the parcel from there.
-    # Plus head_cam is occluded by the carried parcel anyway. Real LIDAR_LINE
-    # comes in Faza 1.2 once the mac scene XML grows a rangefinder.
-    dock_mode: amcl_only
-    final_xy_tol_m: 0.06    # ignored in amcl_only mode but kept for symmetry
+    # head_cam is occluded by the carried parcel during transfer to B,
+    # so dock B uses the rear-LiDAR-style scan (real rt/scan from mac
+    # mj_ray() array, Faza 1.2). LidarLineAligner runs RANSAC on the
+    # 360-ray scan to fit the front edge of table B and aligns
+    # perpendicular at target_distance_m.
+    dock_mode: lidar_line
+    final_xy_tol_m: 0.06    # looser than apriltag — line fit has more noise
     final_yaw_tol_rad: 0.07

@@ -24,15 +24,17 @@ Sim-only knobs versus the real-robot path (courier_full.launch.py):
 Differences from phase0:
   - sim_lowstate_publisher_node REMOVED (mac MuJoCo bridge supplies /lowstate)
   - fake_pick / fake_place REPLACED by REAL action servers (sim-only knobs)
-  - fake_dock REPLACED by REAL dock_action_server (MODE_APRILTAG on both
-    tables; tag5 on A, tag7 on B; fallback intrinsics from docking.yaml)
+  - fake_dock REPLACED by REAL dock_action_server (table A APRILTAG with
+    tag5; table B LIDAR_LINE with mac-published rt/scan from real
+    mj_ray() rangefinder array — see Faza 1.2)
   - fake_navigate REPLACED by REAL kinematic_nav_node — P-controller to the
     target waypoint, publishes /cmd_vel_nav. Mac kinematic mocap integrates
     /cmd_vel and slides the welded pelvis, so the robot physically moves
     A<->B in MuJoCo.
   - retreat is REAL retreat_action_server
-  - sim_lidar_publisher_node still launched for the moment (idle since both
-    docks are APRILTAG); retired when Faza 1.2 adds a real LiDAR sensor.
+  - sim_lidar_publisher_node retired — mac side publishes real rt/scan.
+    Linux only adds static TF pelvis -> lidar_link so RANSAC line fit
+    can express its result in base_link frame.
 
 Expected: full A↔B cycle in ~80 s, smooth pick/place visible in the mac
 MuJoCo viewer, BT auto-restarts cycles via tick_tock.
@@ -115,11 +117,16 @@ def generate_launch_description() -> LaunchDescription:
         Node(package='g1_courier_sim', executable='kinematic_nav_node',
              name='kinematic_nav_node'),
 
-        # Synthetic 2D scan — currently idle because both dock modes use
-        # APRILTAG. Kept launched so a future test in MODE_LIDAR_LINE picks
-        # up a /scan without re-editing this launch file.
-        Node(package='g1_courier_sim', executable='sim_lidar_publisher_node',
-             name='sim_lidar_publisher_node'),
+        # Static TF pelvis -> lidar_link. Mac scene XML mounts the
+        # `lidar_site` inside `pelvis` body at world (0, 0, 0.4) — i.e.
+        # 0.393 m below the welded pelvis at z=0.793. Identity rotation
+        # because the lidar fires its 360-ray sweep in its own XY plane,
+        # already aligned with the robot's heading.
+        Node(package='tf2_ros', executable='static_transform_publisher',
+             name='lidar_static_tf',
+             arguments=['0', '0', '-0.393',
+                        '0', '0', '0', '1',
+                        'pelvis', 'lidar_link']),
 
         # Real dock — MODE_APRILTAG on both tables. Mac /detections from
         # head_cam carries tag5 (A) and tag7 (B); fallback intrinsics from

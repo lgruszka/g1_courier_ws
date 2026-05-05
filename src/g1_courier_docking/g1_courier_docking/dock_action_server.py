@@ -144,10 +144,15 @@ class LidarLineAligner:
             a, b, c = -a, -b, -c
         distance_to_line = -c
         dx = distance_to_line - self.target_distance
+        # yaw_err is the angle between robot's +X (forward) and the line's
+        # inward normal (a, b). When line normal points "to the right"
+        # (yaw_err < 0), the robot must rotate CW (negative angular.z) to
+        # face it — i.e. cmd.angular.z and yaw_err have the *same* sign so
+        # the correction damps the error instead of amplifying it.
         yaw_err = math.atan2(b, a)
         cmd = Twist()
         cmd.linear.x = _clamp(self.kp_xy * dx, -self.max_vx, self.max_vx)
-        cmd.angular.z = _clamp(-self.kp_yaw * yaw_err, -self.max_vyaw, self.max_vyaw)
+        cmd.angular.z = _clamp(self.kp_yaw * yaw_err, -self.max_vyaw, self.max_vyaw)
         return cmd, AlignError(xy_m=abs(dx), yaw_rad=abs(yaw_err))
 
     def _scan_to_points(self, scan: LaserScan) -> list[tuple[float, float]]:
@@ -157,8 +162,12 @@ class LidarLineAligner:
         lo_r = max(self.range_min, scan.range_min if scan.range_min > 0 else self.range_min)
         hi_r = min(self.range_max, scan.range_max if scan.range_max > 0 else self.range_max)
         for r in scan.ranges:
-            if math.isfinite(r) and lo_r < r < hi_r and self.angle_min <= a <= self.angle_max:
-                pts.append((r * math.cos(a), r * math.sin(a)))
+            # Wrap unsigned angles (mac publishes 0..2π) into the signed range
+            # (-π..π) that the forward window expects. Otherwise filter would
+            # only match the right half [0, +π/6] and miss [-π/6, 0].
+            a_signed = a if a <= math.pi else a - 2.0 * math.pi
+            if math.isfinite(r) and lo_r < r < hi_r and self.angle_min <= a_signed <= self.angle_max:
+                pts.append((r * math.cos(a_signed), r * math.sin(a_signed)))
             a += scan.angle_increment
         return pts
 

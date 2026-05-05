@@ -10,6 +10,34 @@ Ten plik jest automatycznie ładowany jako kontekst przy starcie sesji w katalog
 - **Symulator**: strategia trzy-fazowa — (0) no-sim z fixturami, (1) MuJoCo (`unitree_mujoco`) jako *główne* środowisko testów, (2) Isaac Sim na cloud GPU jako finalna walidacja foto-realizmu. Szczegóły w sekcji "Decyzja: symulator".
 - **Workspace**: scaffolded (~60 plików, 6 paczek). Buduje się, ale nie był jeszcze odpalony przeciw realnemu/symulowanemu robotowi.
 
+## Communication channel z mac side (LOKALNY — file-based)
+
+Shared folder zastępuje copy-paste briefów przez user'a:
+
+- **Linux ścieżka**: `/media/psf/Home/g1_courier_shared/`
+- **mac ścieżka**: `~/g1_courier_shared/` (Parallels Shared Folders)
+- Twój **inbox**: `mac_to_linux/` (mac Claude pisze tu do ciebie)
+- Twój **outbox**: `linux_to_mac/` (ty piszesz do mac Claude'a)
+- **`archive/`** — IGNORUJESZ (historyczne, zaaplikowane briefy)
+
+Format każdego briefu: Markdown z YAML frontmatter (`id`, `from`, `to`, `topic`, `status`). Statusy: `pending` → `in_progress` → `done`. Pełne konwencje w `/media/psf/Home/g1_courier_shared/README.md`.
+
+### Reguła check-on-turn (CRITICAL)
+
+**Na początku każdej tury** (przed wykonaniem user task wymagającego działania), zrób:
+
+```bash
+ls -la /media/psf/Home/g1_courier_shared/mac_to_linux/
+```
+
+Jeśli któryś plik tam ma `status: pending` lub świeży `status: done` (mac właśnie zaraportował), którego user **jeszcze nie znał** — zaraportuj user'owi krótko:
+
+> "W inboxie jest brief 0042 (status: done) — `<topic>`. Mac zaraportował X. Chcesz żebym to zaaplikował teraz, czy kontynuować inny task?"
+
+Plus **NIE** applikuj milcząco — user decyduje kolejność. Plus nie czytaj `archive/`. Plus nie wracaj do plików już raportowanych user'owi w tej sesji.
+
+**Wyjątek**: gdy user pyta o coś czysto informacyjnego ("co robisz?", "podsumuj X") — check możesz pominąć. Domyślnie: check przed każdą akcją wymagającą zmiany kodu / runtime / commitu.
+
 ## Pierwsze kroki dla nowej sesji
 
 Przeczytaj w tej kolejności:
@@ -47,7 +75,7 @@ Przeczytaj w tej kolejności:
 | `phase1_smoke.launch.py` (mission BT z real arm + retreat + real dock A) | ✅ pełen cykl A↔B z real arm + real dock APRILTAG na A + real retreat. Dock B w trybie diagnostycznym `amcl_only` do czasu kinematic nav (Faza 1.1+) |
 | `sim_lidar_publisher_node` (LiDAR fixture, ray-cast vs odom) | ✅ |
 | AprilTag tagi + kamera RGB w `unitree_mujoco` scene XML (Faza 1.1) | ✅ tag36h11 id5 (biurko A 1.5 m) i id7 (biurko B 4 m), tag size 0.16 m, head_cam fovy=60° 640×480, pupil_apriltags detector publikuje `rt/detections` ~10–15 Hz |
-| Real LiDAR sensor w `unitree_mujoco` scene XML (Faza 1.2) | ❌ mac side, rangefinder array |
+| Real LiDAR sensor w `unitree_mujoco` scene XML (Faza 1.2) | ✅ `lidar_site` w pelvis body (g1_29dof.xml), 360-ray sweep przez `mj_ray()` w mac bridge'u, `rt/scan` jako `sensor_msgs/LaserScan` @ ~7 Hz wall-clock. Linux dock_action_server MODE_LIDAR_LINE konsumuje. Patrz `docs/phases/phase_1_2.md` |
 | **Pelvis weld pin** (sim-only, dla 1.0..1.2) | ✅ mac scene.xml zedytowany (anchor mocap + `<equality><weld>` + `<option integrator="implicitfast"/>`). Robot stoi prosto (quat=identity, accel=(0,0,9.81)). |
 | **Kinematic mode dla armów** (sim-only) | ✅ mac `unitree_sdk2py_bridge.py` rozpoznaje `motor_cmd[i].mode == 99` i wpisuje `data.qpos[i]` directly zamiast PD-via-torque. arm_controller wpisuje sentinel gdy `kinematic_mode: True` w configu. Wzorowane na `g1_logistics_demo`'s `kinematic_mode = True`. Ramiona poruszają się płynnie, bez drgań typowych dla PD-via-DDS. Domyślnie `False` na realnym robocie. |
 | **Kinematic mocap movement** (sim-only, Faza 1.1) | ✅ mac bridge subskrybuje `rt/cmd_vel`, integruje `pelvis_anchor` `mocap_pos` (rotacja yaw → world frame velocity) i `mocap_quat` co physics step (1 ms). Robot "ślizga się" zgodnie z `/cmd_vel` mimo welded pelvis. Sim-only — usuwa się gdy 1.3 da prawdziwego chodu. |
@@ -86,7 +114,7 @@ Każda kolejna sub-faza wymaga poprzednich. Walking controller (1.3) jest **bram
 - **1.0 — arm + dock LIDAR_LINE** (zrobione): `pick_action_server`, `place_action_server`, `dock_action_server` MODE_LIDAR_LINE z RANSAC, mission BT cycle z fake nav/dock + real arm + real retreat.
 - **1.1 — AprilTag w scene + dock APRILTAG** (zrobione): tag36h11 textury na biurkach A/B, kamera `head_cam` w torso, mac bridge robi detection przez `pupil_apriltags` i publikuje `rt/detections`. Linux `dock_action_server` MODE_APRILTAG używa cv2.solvePnPGeneric. Plus mac kinematic mocap movement integruje `/cmd_vel` w `pelvis_anchor.mocap_pos`. Pełen cykl A↔B przechodzi z dock A real + dock B `amcl_only` (diagnostic do czasu kinematic nav). Patrz `docs/phases/phase_1_1.md`.
 - **1.1+ — kinematic nav** (planowane): zastąpić `fake_navigate_proxy` realnym P-controllerem do target waypoint, `/cmd_vel_nav` → arbiter. Robot fizycznie jeździ A↔B, dock B wraca do trybu APRILTAG (tag7).
-- **1.2 — LiDAR sensor w scene XML + `/scan`**: dodać rangefinder array w MuJoCo (Mid360 surrogate), bridge eksportuje LaserScan na DDS, dock LIDAR_LINE może chodzić na real LiDAR (zamiast `sim_lidar_publisher_node`).
+- **1.2 — LiDAR sensor w scene XML + `/scan`** (zrobione): `lidar_site` w pelvis body (mac scene XML), 360-ray programmatic scan przez `mj_ray()` w bridge'u (zamiast 360 rangefinderów w XML), `rt/scan` jako `sensor_msgs/LaserScan` (mac IDL hand-written). Linux dock_action_server MODE_LIDAR_LINE konsumuje real `/scan`, `sim_lidar_publisher_node` retired. Pełen mission BT cycle z dock A APRILTAG + dock B LIDAR_LINE (~12s każdy) w fizycznym ruchu A↔B. Patrz `docs/phases/phase_1_2.md`.
 - **1.3 — walking controller** (`/cmd_vel` → motor commands na nogi): conditio sine qua non dla 1.4+. Próbowane ścieżki α i β **zawiodły dla naszego use case** i ich kod został usunięty żeby nie mylić — Faza 1.3 będzie czystym refaktorem od zera kiedy będzie czas:
   - α) **Standing PD + cmd_vel fakery**: per-joint PD bez gravity feedforward i bez whole-body coordination (CoM, GRF) nie utrzyma G1 — drobne błędy generują pełen moment, oscylacje, upadek.
   - β) **Pretrained RL policy** (`unitree_rl_gym/deploy/pre_train/g1/motion.pt`): trenowana na free-standing walking bez external arm forces. Nasz pick/place P0→P6 daje 20+ Nm momenty na pelvis → poza distribution → chaotyczne targety nóg → upadek.
@@ -229,6 +257,7 @@ Pełne zasady w `docs/ARCHITECTURE.md`. Najważniejsze, których nie wolno łama
 - **Dock APRILTAG zwraca timeout, robot ustawia się "pod skosem"** — bug w znaku `dyaw` w `_extract_tag_residual`. Każda perturbacja yaw jest wzmacniana zamiast tłumiona. Poprawna formuła: `dyaw = math.atan2(R[0,2], -R[2,2])` (semantyka: dodatnie = robot ma się obrócić CCW żeby skorygować). Zweryfikuj standalone testem na 4 scenariuszach (facing-on, drift L/R, tag rotated L/R) — dla każdego znak ma malować residual do zera.
 - **`SOLVEPNP_IPPE_SQUARE` zwraca rozwiązanie z `R[2,2] > 0` w idealnym facing-on** — degeneracyjny przypadek planar markera. Dwustopniowa disambiguacja: najpierw weź kandydata z `R[2,2] < 0`; jeśli żaden, weź pierwszego i zastosuj `R = R @ diag(1, -1, -1)` (180° flip wokół tag's X). To wymusza poprawny znak normalu.
 - **`/lowstate.motor_state[arm].q` przeplata zera z realnymi wartościami** (identyczne timestampy parami w 30-sample dump) — po stronie maca chodzą **dwie instancje** `mjpython` (zombie z poprzedniego Ctrl+C — `RecurrentThread` w SDK są `daemon=False` i nie giną razem z viewer'em). Stara instancja publikuje `q=0` z sensordata path, nowa publikuje `q=qpos` realne. Linux subscriber dostaje oba. **Fix po stronie maca**: `pkill -f mjpython && pkill -f unitree_mujoco.py` przed nowym `python3 unitree_mujoco.py`. Diagnostyka po Linux: 30-sample test python — jeśli widzisz ~50% zer z timestampami parami, to jest ten bug, NIE szukaj winy w bridge IDL ani arm_controller logice.
+- **Dock LIDAR_LINE timeout, robot dryfuje yaw + przekraża target** — dwa współistniejące bugi w `LidarLineAligner`: (a) `_scan_to_points` filtr `self.angle_min <= a <= self.angle_max` (oczekuje signed -π..π) nie działa z mac scan convention `angle_min=0, angle_max=2π` — widzi tylko prawą połowę forward window. Fix: przed porównaniem zrób `a_signed = a if a <= π else a - 2π`. (b) `cmd.angular.z = -kp * yaw_err` ma odwrócony znak — wzmacnia drift zamiast tłumić. Poprawnie: `cmd.angular.z = +kp * yaw_err` (analogicznie do `dyaw` fix w APRILTAG aligner).
 
 ## Linki referencyjne
 
