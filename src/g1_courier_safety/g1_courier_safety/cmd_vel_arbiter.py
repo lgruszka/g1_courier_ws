@@ -57,6 +57,12 @@ class CmdVelArbiter(Node):
         self.declare_parameter('output_topic', '/cmd_vel')
         self.declare_parameter('publish_rate_hz', 20.0)
         self.declare_parameter('cmd_timeout_s', 0.4)
+        # When nav2 owns /cmd_vel directly (Faza 1.5+), set this False so the
+        # arbiter still hosts /safety/set_carry_mode + /safety/set_freeze
+        # services (mission BT needs them) but doesn't fight nav2 on /cmd_vel.
+        # Dock/retreat in that mode publish straight to /cmd_vel via their
+        # own cmd_vel_topic params.
+        self.declare_parameter('enable_publish', True)
         # normal limits
         self.declare_parameter('max_vx_normal', 0.6)
         self.declare_parameter('max_vy_normal', 0.4)
@@ -162,6 +168,8 @@ class CmdVelArbiter(Node):
     # ---------- main loop ----------
 
     def _tick(self) -> None:
+        if not bool(self.get_parameter('enable_publish').value):
+            return  # service-only mode (Faza 1.5+ where nav2 owns /cmd_vel)
         now_ns = self.get_clock().now().nanoseconds
         with self._lock:
             chosen = self._select(now_ns)

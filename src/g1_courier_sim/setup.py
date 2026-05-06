@@ -24,6 +24,7 @@ setup(
             'sim_lowstate_publisher_node = g1_courier_sim.sim_lowstate_publisher_node:main',
             'sim_lidar_publisher_node = g1_courier_sim.sim_lidar_publisher_node:main',
             'kinematic_nav_node = g1_courier_sim.kinematic_nav_node:main',
+            'nav2_navigate_proxy = g1_courier_sim.nav2_navigate_proxy:main',
             'fake_navigate_proxy = g1_courier_sim.fake_action_servers:main_navigate',
             'fake_dock_action_server = g1_courier_sim.fake_action_servers:main_dock',
             'fake_pick_action_server = g1_courier_sim.fake_action_servers:main_pick',

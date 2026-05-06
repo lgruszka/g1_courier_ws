@@ -149,30 +149,11 @@ def _phase_pickup(node: Node, table: TableConfig) -> py_trees.composites.Sequenc
     return seq
 
 
-# Side via-point used by both transfer phases (A->B and B->A). Without a real
-# planner the straight line between table_a and table_b cuts through table_a's
-# body — robot collides / gets stuck. Detour through y=+0.8 m: that's 0.2 m
-# off table_a's lateral half-extent (0.6 m) so the welded-pelvis robot slides
-# cleanly past on the +Y side. Loose tolerances (15 cm / ~11°) because the
-# via is just a transit point, not a precise pose target.
-_TRANSIT_VIA_X = 1.50
-_TRANSIT_VIA_Y = 0.80
-_TRANSIT_VIA_YAW = 0.0
-_TRANSIT_XY_TOL = 0.15
-_TRANSIT_YAW_TOL = 0.20
-
-
 def _phase_transfer(node: Node, table: TableConfig) -> py_trees.composites.Sequence:
     seq = py_trees.composites.Sequence(name=f'transfer_to_{table.name}', memory=True)
     seq.add_children([
-        NavigateTo(
-            f'transit_via_to_{table.name}', node,
-            frame_id='map',
-            x=_TRANSIT_VIA_X, y=_TRANSIT_VIA_Y, yaw=_TRANSIT_VIA_YAW,
-            waypoint_name='transit_via',
-            xy_tolerance_m=_TRANSIT_XY_TOL,
-            yaw_tolerance_rad=_TRANSIT_YAW_TOL,
-        ),
+        # Single nav2 goal — A* with inflation 0.40 plans a smooth detour
+        # around table A/B without needing a manual via-point.
         NavigateTo(
             f'navigate_to_{table.name}', node,
             frame_id='map', x=table.predock_x, y=table.predock_y, yaw=table.predock_yaw,

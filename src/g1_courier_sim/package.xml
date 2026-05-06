@@ -11,6 +11,7 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>unitree_hg</exec_depend>
   <exec_depend>g1_courier_msgs</exec_depend>
