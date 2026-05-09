@@ -1,33 +1,30 @@
 tables:
-  # NOTE: predock_x is the world-frame target where kinematic_nav stops; the
-  # dock servo then converges from there to target_distance_m (0.55) from
-  # the tag. mac scene puts table centres at x={1.5, 4.0} and the tag plates
-  # on the front face — measured tag world-x via PnP is ~{1.24, 3.74}, so
-  # predock at ~0.74 m before the tag leaves dock servo a comfortable
-  # ~0.2 m margin and keeps the tag inside head_cam FoV.
+  # predock_x is the world-frame target where nav2 stops; the dock servo then
+  # converges from there. Mission BT chooses dock mode per-phase (not per-table):
+  #   pickup_at_X: MODE_APRILTAG twice — first table tag (id=5/7) at 30 cm,
+  #                then parcel tag (id=10) at 17 cm for grasp alignment
+  #   transfer_to_X (place): MODE_LIDAR_LINE — head_cam is occluded by the
+  #                          carried parcel, RANSAC line fit instead.
+  # `dock_mode` field below is therefore IGNORED by mission BT but retained as
+  # a hint for ad-hoc /dock_to_table action calls (e.g. manual debug).
   table_a:
     apriltag_id: 5
-    predock_x: 0.50
+    # predock close enough that tag10 (parcel front face, 10cm tag) is in
+    # head_cam FoV — mac confirmed at world X=0.80 (post-tag5-dock pose):
+    # tag10 detected with margin 42.5. Nav2 brings robot here, then
+    # dock_to_parcel APRILTAG advances ~13 cm to grasp pose (X=0.93).
+    predock_x: 0.80
     predock_y: 0.00
     predock_yaw: 0.00    # facing the table
-    # Same reason as table_b: on the return leg (B→A) the carried parcel
-    # occludes head_cam, so APRILTAG would fail. LIDAR_LINE uses the
-    # pelvis-mounted 360° lidar (parcel-independent) and works on both
-    # the first visit (no carry) and the return (carry).
-    dock_mode: lidar_line
-    final_xy_tol_m: 0.06
-    final_yaw_tol_rad: 0.07
+    dock_mode: apriltag  # ignored by mission BT; pickup uses APRILTAG anyway
+    final_xy_tol_m: 0.03
+    final_yaw_tol_rad: 0.05
 
   table_b:
     apriltag_id: 7
-    predock_x: 3.00
+    predock_x: 3.30      # symmetric to table_a; parcel_b_X=3.70, post-dock=3.43
     predock_y: 0.00
     predock_yaw: 0.00
-    # head_cam is occluded by the carried parcel during transfer to B,
-    # so dock B uses the rear-LiDAR-style scan (real rt/scan from mac
-    # mj_ray() array, Faza 1.2). LidarLineAligner runs RANSAC on the
-    # 360-ray scan to fit the front edge of table B and aligns
-    # perpendicular at target_distance_m.
-    dock_mode: lidar_line
-    final_xy_tol_m: 0.06    # looser than apriltag — line fit has more noise
-    final_yaw_tol_rad: 0.07
+    dock_mode: apriltag  # ignored by mission BT; pickup uses APRILTAG anyway
+    final_xy_tol_m: 0.03
+    final_yaw_tol_rad: 0.05

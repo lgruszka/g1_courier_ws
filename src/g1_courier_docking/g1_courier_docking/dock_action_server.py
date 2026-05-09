@@ -217,6 +217,7 @@ class DockActionServer(Node):
         self.declare_parameter('apriltag.max_vx', 0.15)
         self.declare_parameter('apriltag.max_vy', 0.10)
         self.declare_parameter('apriltag.max_vyaw', 0.4)
+        self.declare_parameter('apriltag.yaw_deadband_rad', 0.10)
         self.declare_parameter('apriltag.target_distance_m', 0.55)
         self.declare_parameter('apriltag.tag_size_m', 0.16)
         self.declare_parameter('camera_info_topic', '/camera_info')
@@ -231,6 +232,12 @@ class DockActionServer(Node):
         self.declare_parameter('lidar.kp_yaw', 1.0)
         self.declare_parameter('lidar.max_vx', 0.12)
         self.declare_parameter('lidar.max_vyaw', 0.3)
+        # Forward window for RANSAC line fit. range_min must be < target_distance
+        # so the table edge stays in the window even at convergence — otherwise
+        # the aligner filters out the table when robot is closer than range_min,
+        # returns inf err, robot stops short of the goal.
+        self.declare_parameter('lidar.range_min_m', 0.05)
+        self.declare_parameter('lidar.range_max_m', 2.5)
 
         cmd_topic = str(self.get_parameter('cmd_vel_topic').value)
         self._rate_hz = max(1.0, float(self.get_parameter('control_rate_hz').value))
@@ -386,6 +393,16 @@ class DockActionServer(Node):
         )
         period = 1.0 / self._rate_hz
         within_tol_count = 0
+        no_det_count = 0   # consecutive ticks without a valid tag detection
+        no_det_recovery_threshold = max(5, int(self._rate_hz))   # ~1 s @ 20 Hz
+        # Per-call target_distance for log readability — same resolution as
+        # _extract_tag_residual uses internally.
+        log_target_m = (
+            float(request.target_pose.pose.position.z)
+            if request.target_pose.pose.position.z > 0.0
+            else float(self.get_parameter('apriltag.target_distance_m').value)
+        )
+        log_tick = 0
 
         while True:
             if self._cancel_event.is_set():
@@ -401,14 +418,50 @@ class DockActionServer(Node):
 
             dx, dy, dyaw = self._extract_tag_residual(request.apriltag_id, request.target_pose)
             if dx is None:
-                # No detection this tick; brake briefly and continue.
-                self._publish_zero()
+                no_det_count += 1
+                if no_det_count >= no_det_recovery_threshold:
+                    # Tag lost for >1 s — back up slowly to recover FoV. Robot
+                    # was likely too close (tag at FoV edge) or laterally
+                    # offset (tag cropped). Backing up shrinks tag in image
+                    # so corners come into view, dock loop resumes.
+                    recovery_cmd = Twist()
+                    recovery_cmd.linear.x = -0.05   # 5 cm/s backwards
+                    self._cmd_pub.publish(recovery_cmd)
+                    if no_det_count % 10 == 0:
+                        self.get_logger().info(
+                            f'[dock_apriltag tag={request.apriltag_id}] no detection '
+                            f'for {no_det_count} ticks, recovering (vx=-0.05)')
+                else:
+                    self._publish_zero()
                 time.sleep(period)
                 continue
+            no_det_count = 0   # reset on successful detection
+            # Deadband on yaw — suppresses PnP/IPPE noise and 2-fold ambiguity
+            # flip (±0.6 rad spurious jumps) when robot is essentially aligned.
+            # Real rotations >threshold pass through unchanged.
+            yaw_deadband = float(self.get_parameter('apriltag.yaw_deadband_rad').value)
+            if abs(dyaw) < yaw_deadband:
+                dyaw = 0.0
 
             cmd, err = aligner.step(dx, dy, dyaw)
             self._cmd_pub.publish(cmd)
             self._publish_feedback(goal_handle, 'servoing', err)
+
+            # Throttled servo log — every 5 ticks (~4 Hz @ rate 20). Shows
+            # current z_c, target, dx, err.xy and the published cmd so user
+            # can see live why the dock does/doesn't converge.
+            log_tick += 1
+            if log_tick % 5 == 0:
+                z_c = dx + log_target_m  # dx = z_c - target → z_c = dx + target
+                self.get_logger().info(
+                    f'[dock_apriltag tag={request.apriltag_id}] '
+                    f'z_c={z_c:.3f} target={log_target_m:.3f} '
+                    f'dx={dx:+.3f} dy={dy:+.3f} dyaw={dyaw:+.3f} '
+                    f'err.xy={err.xy_m:.3f} err.yaw={err.yaw_rad:.3f} '
+                    f'cmd.vx={cmd.linear.x:+.3f} cmd.vy={cmd.linear.y:+.3f} '
+                    f'cmd.wz={cmd.angular.z:+.3f} '
+                    f'in_tol={within_tol_count}/{self._settle_samples}'
+                )
 
             if err.xy_m <= request.xy_tolerance_m and err.yaw_rad <= request.yaw_tolerance_rad:
                 within_tol_count += 1
@@ -439,10 +492,11 @@ class DockActionServer(Node):
           4. dx is forward overshoot vs target_distance, dy is lateral, dyaw is
              rotation about robot Z extracted from the tag's normal direction.
 
-        `goal_pose` is currently unused: the per-table predock target lives
-        in waypoints.yaml and the residual is always relative to "centred on
-        the tag at target_distance facing it". When we add multi-pose docks
-        (e.g. side approach) we'll reintroduce goal_pose here.
+        `goal_pose.pose.position.z` overrides target_distance for this call —
+        used by mission BT to dock at different distances per tag (table tag
+        at 0.30 m, parcel tag10 at 0.17 m for palm-press alignment). Lateral
+        offset (dx, dy in tag frame) and orientation are still always "centred
+        and facing"; multi-pose side-approach can be added later.
         """
         if not CV2_OK:
             return (None, None, None)
@@ -451,7 +505,15 @@ class DockActionServer(Node):
             K = self._camera_K
         if msg is None or K is None:
             return (None, None, None)
-        target_distance = float(self.get_parameter('apriltag.target_distance_m').value)
+        # Allow per-call override of target_distance via the goal's target_pose.
+        # Mission BT uses this to dock at different distances for different tags
+        # (e.g. 0.30 m from table tag5/7 for table-dock, 0.17 m from parcel
+        # tag10 for parcel-dock). Falls back to config default when goal sends
+        # an empty pose.
+        if goal_pose is not None and goal_pose.pose.position.z > 0.0:
+            target_distance = float(goal_pose.pose.position.z)
+        else:
+            target_distance = float(self.get_parameter('apriltag.target_distance_m').value)
         tag_size_m = float(self.get_parameter('apriltag.tag_size_m').value)
         s = tag_size_m / 2.0
         # OpenCV SOLVEPNP_IPPE_SQUARE requires obj_pts in TL,TR,BR,BL order
@@ -470,6 +532,13 @@ class DockActionServer(Node):
             corners = getattr(det, 'corners', None)
             if corners is None or len(corners) != 4:
                 return (None, None, None)
+            # NOTE: previously rejected detections with corners at image edges,
+            # but that created a "dead zone" — when nav left robot with lateral
+            # offset (xy_goal_tolerance=0.20), tag corners at FoV edge were
+            # rejected, aligner published 0, robot never moved to recover.
+            # Now: trust IPPE solver even with partial cropping. PnP is robust
+            # to one corner near edge (reprojection error increases but tvec
+            # roughly OK). Aligner has time to servo robot back into clean view.
             img_pts = np.array([
                 (float(corners[3].x), float(corners[3].y)),  # TL
                 (float(corners[2].x), float(corners[2].y)),  # TR
@@ -524,6 +593,8 @@ class DockActionServer(Node):
             kp_yaw=float(self.get_parameter('lidar.kp_yaw').value),
             max_vx=float(self.get_parameter('lidar.max_vx').value),
             max_vyaw=float(self.get_parameter('lidar.max_vyaw').value),
+            range_min_m=float(self.get_parameter('lidar.range_min_m').value),
+            range_max_m=float(self.get_parameter('lidar.range_max_m').value),
         )
         period = 1.0 / self._rate_hz
         within_tol_count = 0

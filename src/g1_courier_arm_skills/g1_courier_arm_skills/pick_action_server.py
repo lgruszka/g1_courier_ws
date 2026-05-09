@@ -9,6 +9,7 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.action.server import ServerGoalHandle
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from std_msgs.msg import String
 
 from g1_courier_msgs.action import PickBox
 
@@ -46,6 +47,12 @@ class PickActionServer(Node):
             grasp_threshold_nm=float(self.get_parameter('grasp_tau_threshold_nm').value),
             controller_config=cfg,
         )
+
+        # Sim parcel attach signal — mac MuJoCo bridge subscribes to /parcel_state
+        # (DDS rt/parcel_state) and toggles weld between parcel and right_wrist_yaw_link.
+        # Activated at end of 'grasp' stage (i.e. start of 'lift') when hands have
+        # closed on the parcel. Real robot ignores this — mac-only feature.
+        self._parcel_state_pub = self.create_publisher(String, '/parcel_state', 10)
 
         self._busy_lock = threading.Lock()
         self._action_server = ActionServer(
@@ -87,6 +94,17 @@ class PickActionServer(Node):
             fb.phase = label
             fb.progress = float(progress)
             goal_handle.publish_feedback(fb)
+            # Trigger TwoHandGrasp.attach() on mac at start of 'lift' stage
+            # (P4 grasp pose — palms have closed around parcel). Mac runs
+            # gating (d_l, d_r < 0.20, sep < 0.30); if hands are around
+            # parcel, captures offset_from_midpoint and tracks parcel through
+            # subsequent stages (P5 lift, P6 carry). If gating fails, parcel
+            # stays on table and mission BT continues without grasp.
+            if label == 'lift':
+                msg = String()
+                msg.data = 'carrying'
+                self._parcel_state_pub.publish(msg)
+                self.get_logger().info('parcel_state -> carrying')
 
         try:
             # Tell any other arm server (place) to release its hold thread

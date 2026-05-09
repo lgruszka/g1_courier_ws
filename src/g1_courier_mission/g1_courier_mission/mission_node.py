@@ -32,12 +32,40 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 
+from geometry_msgs.msg import PoseStamped
+
 from g1_courier_msgs.action import DockToTable
 from g1_courier_msgs.msg import MissionStatus
 
 from .behaviors import (
-    DockTo, NavigateTo, Pick, Place, RetreatBy, SetCarry, TableConfig,
+    DockTo, NavigateTo, Pause, Pick, Place, RetreatBy, SetCarry, TableConfig,
 )
+
+
+# Sleep between mission stages so the robot visibly stops at each transition
+# (nav → dock → pick → carry, etc.). Plus emits `[STAGE PAUSE]` log line.
+STAGE_PAUSE_S = 0.2
+
+
+# AprilTag id stuck on the parcel front face (added in Faza 1.5+ scene XML
+# update). pickup uses APRILTAG dock to this tag for grasp alignment.
+PARCEL_TAG_ID = 10
+# target_distance is along camera's optical axis (depth in cam frame), not
+# horizontal world distance. With head_cam pitched 42° down + cam world Z=1.20
+# vs parcel tag10 Z=0.975, depth-to-tag has both horizontal and vertical
+# components. Dropping to 0.17 puts pelvis too far forward (wrist 5cm past
+# parcel center) AND places tag at -41° below cam axis (outside ±30° FoV).
+# 0.25 puts pelvis at ~0.87 → wrist at ~1.15 (front quarter of parcel, palm-
+# press grips OK) and tag at -18° (well within FoV for tracking during servo).
+PARCEL_DOCK_DISTANCE_M = 0.50
+
+
+def _tag_relative_pose(z: float) -> PoseStamped:
+    p = PoseStamped()
+    p.header.frame_id = 'tag'
+    p.pose.position.z = float(z)
+    p.pose.orientation.w = 1.0
+    return p
 
 
 class _MissionStatusPublisher:
@@ -130,6 +158,14 @@ def _load_waypoints(node: Node) -> Dict[str, TableConfig]:
 
 
 def _phase_pickup(node: Node, table: TableConfig) -> py_trees.composites.Sequence:
+    """Pickup at table_X — head_cam unoccluded:
+
+    1. nav2 brings robot roughly to predock (~0.60 m before table edge)
+    2. APRILTAG dock to parcel tag10 — precise grasp alignment via the
+       parcel itself (table tags 5/7 are not used; pickup pose is parcel-
+       relative, not table-relative)
+    3. Pick sequence — palm-press friction holds the parcel
+    """
     seq = py_trees.composites.Sequence(name=f'pickup_at_{table.name}', memory=True)
     seq.add_children([
         SetCarry('carry_off_for_pick', node, carrying=False),
@@ -138,35 +174,60 @@ def _phase_pickup(node: Node, table: TableConfig) -> py_trees.composites.Sequenc
             frame_id='map', x=table.predock_x, y=table.predock_y, yaw=table.predock_yaw,
             waypoint_name=f'{table.name}_predock',
         ),
+        Pause(f'pause_after_nav_{table.name}', node, duration_s=STAGE_PAUSE_S),
         DockTo(
-            f'dock_to_{table.name}', node,
-            mode=table.dock_mode, tag_id=table.apriltag_id,
-            xy_tol_m=table.final_xy_tol_m, yaw_tol_rad=table.final_yaw_tol_rad,
+            f'dock_to_parcel_{table.name}', node,
+            mode=DockToTable.Goal.MODE_APRILTAG,
+            tag_id=PARCEL_TAG_ID,
+            target_pose=_tag_relative_pose(z=PARCEL_DOCK_DISTANCE_M),
+            # Loose tolerance — detection→cmd latency causes ~10 cm overshoot
+            # at convergence. Plus PnP returns garbage when tag corners crop
+            # at FoV edges (close approach). Tolerance 0.10/0.15 lets dock
+            # declare done before tag exits FoV.
+            xy_tol_m=0.10, yaw_tol_rad=0.15,
         ),
+        Pause(f'pause_before_pick_{table.name}', node, duration_s=STAGE_PAUSE_S),
         Pick(f'pick_at_{table.name}', node),
+        Pause(f'pause_after_pick_{table.name}', node, duration_s=STAGE_PAUSE_S),
         SetCarry('carry_on_after_pick', node, carrying=True),
+        # Retreat 0.5 m back from table — after parcel-relative dock + pick,
+        # robot pelvis is ~0.10 m from table front edge (well inside the
+        # global_costmap inflation_radius=0.40). Without this retreat the
+        # next NavigateTo (transfer to other table) fails: planner returns
+        # "Failed to create plan" because start pose is in lethal-cost zone.
+        RetreatBy(f'retreat_after_pick_{table.name}', node, distance_m=0.5),
     ])
     return seq
 
 
 def _phase_transfer(node: Node, table: TableConfig) -> py_trees.composites.Sequence:
+    """Transfer to table_X with parcel — head_cam occluded by carried parcel,
+    so use LIDAR_LINE (RANSAC line fit on pelvis-mounted 360° lidar — parcel-
+    independent). nav2 plans smooth detour around tables; place sequence
+    lowers parcel onto table, palm-press releases via friction physics."""
     seq = py_trees.composites.Sequence(name=f'transfer_to_{table.name}', memory=True)
     seq.add_children([
-        # Single nav2 goal — A* with inflation 0.40 plans a smooth detour
-        # around table A/B without needing a manual via-point.
         NavigateTo(
             f'navigate_to_{table.name}', node,
             frame_id='map', x=table.predock_x, y=table.predock_y, yaw=table.predock_yaw,
             waypoint_name=f'{table.name}_predock',
         ),
+        Pause(f'pause_after_nav_to_{table.name}', node, duration_s=STAGE_PAUSE_S),
         DockTo(
             f'dock_to_{table.name}', node,
-            mode=table.dock_mode, tag_id=table.apriltag_id,
+            mode=DockToTable.Goal.MODE_LIDAR_LINE,
+            tag_id=-1,  # unused for LIDAR_LINE
             xy_tol_m=table.final_xy_tol_m, yaw_tol_rad=table.final_yaw_tol_rad,
         ),
+        Pause(f'pause_before_place_{table.name}', node, duration_s=STAGE_PAUSE_S),
         Place(f'place_at_{table.name}', node),
+        Pause(f'pause_after_place_{table.name}', node, duration_s=STAGE_PAUSE_S),
         SetCarry('carry_off_after_place', node, carrying=False),
-        RetreatBy('retreat_after_place', node, distance_m=0.5),
+        # 1.0 m retreat (was 0.5) — after place robot pelvis ~0.93 m from table
+        # front; with inflation 0.35 around table, planner needs ≥0.40 m gap to
+        # plan next cycle. 1.0 m retreat puts robot at ~−0.07 m (well clear)
+        # with parcel still in head_cam FoV for next dock approach.
+        RetreatBy('retreat_after_place', node, distance_m=1.0),
     ])
     return seq
 

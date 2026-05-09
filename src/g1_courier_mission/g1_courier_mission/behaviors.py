@@ -7,6 +7,7 @@ mission_node.py.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -56,11 +57,14 @@ class _ActionBehaviour(py_trees.behaviour.Behaviour):
         self._client: Optional[ActionClient] = None
         self._goal_handle = None
         self._result_future = None
+        self._stage_t0: Optional[float] = None
 
     def setup(self, **kwargs) -> None:
         self._client = ActionClient(self._node, self.action_type, self.action_name)
 
     def initialise(self) -> None:
+        self._stage_t0 = time.monotonic()
+        self._node.get_logger().info(f'[STAGE START] {self.name}')
         self._goal_handle = None
         self._result_future = None
         if not self._client.wait_for_server(timeout_sec=1.0):
@@ -89,7 +93,10 @@ class _ActionBehaviour(py_trees.behaviour.Behaviour):
         outcome = self._result_future.result()
         ok = bool(getattr(outcome.result, 'success', False))
         msg = getattr(outcome.result, 'message', '')
-        self._node.get_logger().info(f'{self.name}: {"OK" if ok else "FAIL"} - {msg}')
+        end_tag = 'OK' if ok else 'FAIL'
+        elapsed = time.monotonic() - self._stage_t0 if self._stage_t0 is not None else 0.0
+        self._node.get_logger().info(
+            f'[STAGE END] {self.name}: {end_tag} ({elapsed:.2f}s) - {msg}')
         return py_trees.common.Status.SUCCESS if ok else py_trees.common.Status.FAILURE
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
@@ -235,6 +242,32 @@ class SetFreezeMode(py_trees.behaviour.Behaviour):
         if not self._future.done():
             return py_trees.common.Status.RUNNING
         return py_trees.common.Status.SUCCESS
+
+
+# ---------- visual pause between stages ----------
+
+class Pause(py_trees.behaviour.Behaviour):
+    """RUNNING for `duration_s`, then SUCCESS. Inserted between mission BT
+    stages so the robot visibly stops between e.g. nav and dock — gives the
+    user a clean transition cue (and the matching `[STAGE PAUSE]` log line)."""
+
+    def __init__(self, name: str, node: Node, duration_s: float = 0.5) -> None:
+        super().__init__(name)
+        self._node = node
+        self._duration = float(duration_s)
+        self._start: Optional[float] = None
+
+    def initialise(self) -> None:
+        self._start = time.monotonic()
+        self._node.get_logger().info(
+            f'[STAGE PAUSE] {self.name} ({self._duration:.2f}s)')
+
+    def update(self) -> py_trees.common.Status:
+        if self._start is None:
+            return py_trees.common.Status.RUNNING
+        if time.monotonic() - self._start >= self._duration:
+            return py_trees.common.Status.SUCCESS
+        return py_trees.common.Status.RUNNING
 
 
 # ---------- sequence helper ----------
