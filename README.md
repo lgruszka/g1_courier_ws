@@ -257,6 +257,23 @@ python3 tools/plan_viz.py
 
 Skróty klawiszowe (`q`/`s`) opisane w `tools/README.md`.
 
+### RViz z modelem 3D robota
+
+Preset z gotowymi displays (RobotModel z URDF, Map, /scan, nav2 plan,
+AMCL pose, TF):
+
+```bash
+rviz2 -d $(ros2 pkg prefix g1_courier_bringup)/share/g1_courier_bringup/rviz/courier.rviz
+```
+
+Działa zarówno z `real.launch.py` (real robot) jak i `phase1_full.launch.py`
+(sim) — oba publikują `/robot_description` przez `robot_state_publisher`
+plus `/joint_states` przez `lowstate_to_joint_states`. Wymaga sklonowanego
+`unitree_ros` w `src/` (URDF G1).
+
+W RViz: **Fixed Frame: map** (default w presecie). Przełącz na `base_link`
+jeśli chcesz local view robota podczas docka.
+
 ## Budowanie mapy (raz na lab)
 
 ```bash
