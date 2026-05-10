@@ -27,10 +27,11 @@ przejdź od razu do [Pierwsze uruchomienie misji](#pierwsze-uruchomienie-misji).
 - [ ] Unitree G1 (29-DoF) z włączonym `arm_sdk` i gotowym sport API
 - [ ] Livox Mid-360 zamontowany na głowie, USB do onboard PC
 - [ ] RealSense D435i w torsie, USB3
-- [ ] Dwa biurka (table A, table B) oznaczone AprilTagiem `tag36h11`:
-  - Table A → id `5`, długość boku 0.16 m, na przedniej krawędzi
-  - Table B → id `7`, ta sama family/size
-- [ ] Tekturowy karton z tagiem `id=10` na górnej ścianie (rozmiar 0.10 m)
+- [ ] Dwa biurka (table A, table B) — **bez AprilTagów na biurkach**.
+  Lokalizacja biurek tylko z mapy + LIDAR_LINE (RANSAC na krawędzi).
+- [ ] Tekturowy karton z AprilTagiem `tag36h11` `id=10` na ścianie
+  kartonu (rozmiar 0.10 m) — JEDYNY tag używany w systemie. Robot
+  używa go tylko do precyzyjnego docka pod chwyt (`pick_box`).
 - [ ] WiFi lub ethernet między onboard PC a dev laptopem (do RViz / debug)
 
 ## Instalacja oprogramowania (jednorazowo)
@@ -204,8 +205,9 @@ Masz teraz `~/maps/lab.pgm` + `~/maps/lab.yaml`.
 per-biurko w **world (map) frame**. Po zapisaniu nowej mapy musisz
 zaktualizować X/Y/yaw każdego predocka tak, żeby:
 
-- nav2 sprowadzał robota ~30 cm przed krawędzią biurka
-- tag5/tag7 był wycentrowany w polu widzenia `head_cam` z tej pozycji
+- nav2 sprowadzał robota ~50 cm przed krawędzią biurka
+- karton z tagiem id=10 leżący na biurku był w polu widzenia `head_cam`
+  z tej pozycji (do późniejszego docka APRILTAG)
 
 ### Procedura
 
@@ -233,7 +235,6 @@ zaktualizować X/Y/yaw każdego predocka tak, żeby:
    ```yaml
    tables:
      table_a:
-       apriltag_id: 5
        predock_x: 1.42      # zmierzone: krawędź biurka 1.92 m, robot 0.50 m za
        predock_y: 0.00
        predock_yaw: 0.0
@@ -241,7 +242,6 @@ zaktualizować X/Y/yaw każdego predocka tak, żeby:
        final_xy_tol_m: 0.03
        final_yaw_tol_rad: 0.05
      table_b:
-       apriltag_id: 7
        predock_x: 4.10
        ...
    ```
@@ -251,9 +251,10 @@ zaktualizować X/Y/yaw każdego predocka tak, żeby:
    ```bash
    ros2 launch g1_courier_bringup real.launch.py map:=$HOME/maps/lab.yaml
    # W RViz, "2D Goal Pose" → kliknij w pozycję predock_a.
-   # Po zakończeniu nav, w innym terminalu:
+   # Po zakończeniu nav, postaw na biurku karton z tagiem id=10.
+   # W innym terminalu:
    ros2 topic echo /detections --once
-   # Spodziewany tag id=5 z niezerowymi corners i centre blisko (640, 480)/2.
+   # Spodziewany tag id=10 z niezerowymi corners i centre blisko (640, 480)/2.
    ```
 
 6. Powtórz dla biurka B.
@@ -268,7 +269,7 @@ Spodziewana sekwencja:
 
 1. AMCL zbiega na zapisaną mapę (ustaw initial pose w RViz jeśli trzeba)
 2. Mission BT nawiguje do predocka_a
-3. Dock APRILTAG do tag5 (30 cm), potem do box tag10 (17 cm)
+3. Dock APRILTAG do box tag10 (17 cm) — biurko bez własnego taga
 4. `pick_box` wykonuje sekwencję P0..P6 → `grasp_verified=true`
 5. Włącza się carry mode (niższe limity prędkości z `safety.yaml`)
 6. Nawigacja do predocka_b
@@ -411,11 +412,11 @@ ros2 action send_goal /place_box g1_courier_msgs/action/PlaceBox \
   '{target_pose: {header: {frame_id: ""}}, sequence_name: "place_box", timeout_s: 30.0}' \
   --feedback
 
-# /dock_to_table APRILTAG (tag5):
+# /dock_to_table APRILTAG (tag10 na kartonie — jedyny tag w systemie):
 ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
-  '{mode: 0, apriltag_id: 5,
-    target_pose: {header: {frame_id: "tag_a"}},
-    xy_tolerance_m: 0.03, yaw_tolerance_rad: 0.05, timeout_s: 25.0}' \
+  '{mode: 0, apriltag_id: 10,
+    target_pose: {header: {frame_id: "tag_box"}},
+    xy_tolerance_m: 0.10, yaw_tolerance_rad: 0.15, timeout_s: 25.0}' \
   --feedback
 
 # /dock_to_table LIDAR_LINE (predock world (4.10, 0, 0)):

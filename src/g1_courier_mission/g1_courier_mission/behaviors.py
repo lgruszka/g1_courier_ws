@@ -275,7 +275,6 @@ class Pause(py_trees.behaviour.Behaviour):
 @dataclass
 class TableConfig:
     name: str
-    apriltag_id: int
     predock_x: float
     predock_y: float
     predock_yaw: float

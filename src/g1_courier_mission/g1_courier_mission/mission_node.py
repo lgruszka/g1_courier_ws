@@ -145,7 +145,6 @@ def _load_waypoints(node: Node) -> Dict[str, TableConfig]:
         }[raw['dock_mode']]
         out[name] = TableConfig(
             name=name,
-            apriltag_id=int(raw['apriltag_id']),
             predock_x=float(raw['predock_x']),
             predock_y=float(raw['predock_y']),
             predock_yaw=float(raw['predock_yaw']),
@@ -161,9 +160,8 @@ def _phase_pickup(node: Node, table: TableConfig) -> py_trees.composites.Sequenc
     """Pickup at table_X — head_cam unoccluded:
 
     1. nav2 brings robot roughly to predock (~0.60 m before table edge)
-    2. APRILTAG dock to box tag10 — precise grasp alignment via the
-       box itself (table tags 5/7 are not used; pickup pose is box-
-       relative, not table-relative)
+    2. APRILTAG dock to box tag10 — precise grasp alignment via the box
+       itself (the table has NO tag — pickup pose is box-relative)
     3. Pick sequence — palm-press friction holds the box
     """
     seq = py_trees.composites.Sequence(name=f'pickup_at_{table.name}', memory=True)

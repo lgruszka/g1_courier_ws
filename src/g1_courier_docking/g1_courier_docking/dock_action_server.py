@@ -493,10 +493,10 @@ class DockActionServer(Node):
              rotation about robot Z extracted from the tag's normal direction.
 
         `goal_pose.pose.position.z` overrides target_distance for this call —
-        used by mission BT to dock at different distances per tag (table tag
-        at 0.30 m, box tag10 at 0.17 m for palm-press alignment). Lateral
-        offset (dx, dy in tag frame) and orientation are still always "centred
-        and facing"; multi-pose side-approach can be added later.
+        mission BT uses 0.17 m from box tag10 for palm-press alignment.
+        Lateral offset (dx, dy in tag frame) and orientation are still
+        always "centred and facing"; multi-pose side-approach can be added
+        later.
         """
         if not CV2_OK:
             return (None, None, None)
@@ -506,10 +506,8 @@ class DockActionServer(Node):
         if msg is None or K is None:
             return (None, None, None)
         # Allow per-call override of target_distance via the goal's target_pose.
-        # Mission BT uses this to dock at different distances for different tags
-        # (e.g. 0.30 m from table tag5/7 for table-dock, 0.17 m from box
-        # tag10 for box-dock). Falls back to config default when goal sends
-        # an empty pose.
+        # Mission BT uses 0.17 m from box tag10 for palm-press alignment;
+        # falls back to config default when goal sends an empty pose.
         if goal_pose is not None and goal_pose.pose.position.z > 0.0:
             target_distance = float(goal_pose.pose.position.z)
         else:

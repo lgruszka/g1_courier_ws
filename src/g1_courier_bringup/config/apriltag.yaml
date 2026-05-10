@@ -1,7 +1,7 @@
 apriltag_node:
   ros__parameters:
     family: 36h11
-    size: 0.16              # TODO_TUNE: physical tag side length [m]
+    size: 0.10              # box tag physical side length [m] — only tag in system
     max_hamming: 0
     z_up: false
     profile: false
@@ -12,6 +12,6 @@ apriltag_node:
       refine: true
       sharpening: 0.25
     tag:
-      ids: [5, 7]           # table_a -> 5, table_b -> 7
-      frames: [tag_a, tag_b]
-      sizes: [0.16, 0.16]
+      ids: [10]             # box (cardboard parcel) — the only AprilTag we use
+      frames: [tag_box]
+      sizes: [0.10]

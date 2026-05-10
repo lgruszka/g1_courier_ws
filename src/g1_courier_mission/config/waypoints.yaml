@@ -1,30 +1,28 @@
 tables:
   # predock_x is the world-frame target where nav2 stops; the dock servo then
   # converges from there. Mission BT chooses dock mode per-phase (not per-table):
-  #   pickup_at_X: MODE_APRILTAG twice — first table tag (id=5/7) at 30 cm,
-  #                then box tag (id=10) at 17 cm for grasp alignment
+  #   pickup_at_X: MODE_APRILTAG to box tag (id=10) at 17 cm for grasp alignment.
+  #                Table itself has NO AprilTag — only the cardboard box does.
   #   transfer_to_X (place): MODE_LIDAR_LINE — head_cam is occluded by the
-  #                          carried box, RANSAC line fit instead.
-  # `dock_mode` field below is therefore IGNORED by mission BT but retained as
-  # a hint for ad-hoc /dock_to_table action calls (e.g. manual debug).
+  #                          carried box, RANSAC line fit on table edge instead.
+  # `dock_mode` field below is a hint for ad-hoc /dock_to_table action calls
+  # (e.g. manual debug); mission BT ignores it.
   table_a:
-    apriltag_id: 5
-    # predock close enough that tag10 (box front face, 10cm tag) is in
-    # head_cam FoV — mac confirmed at world X=0.80 (post-tag5-dock pose):
-    # tag10 detected with margin 42.5. Nav2 brings robot here, then
-    # dock_to_parcel APRILTAG advances ~13 cm to grasp pose (X=0.93).
+    # Predock close enough that tag10 (box front face, 10 cm tag) is in head_cam
+    # FoV — confirmed at world X=0.80: tag10 detected with margin 42.5. Nav2
+    # brings robot here, then dock_to_box APRILTAG advances ~13 cm to grasp
+    # pose (X=0.93).
     predock_x: 0.80
     predock_y: 0.00
     predock_yaw: 0.00    # facing the table
-    dock_mode: apriltag  # ignored by mission BT; pickup uses APRILTAG anyway
+    dock_mode: apriltag
     final_xy_tol_m: 0.03
     final_yaw_tol_rad: 0.05
 
   table_b:
-    apriltag_id: 7
-    predock_x: 3.30      # symmetric to table_a; parcel_b_X=3.70, post-dock=3.43
+    predock_x: 3.30      # symmetric to table_a; box_b_X=3.70, post-dock=3.43
     predock_y: 0.00
     predock_yaw: 0.00
-    dock_mode: apriltag  # ignored by mission BT; pickup uses APRILTAG anyway
+    dock_mode: apriltag
     final_xy_tol_m: 0.03
     final_yaw_tol_rad: 0.05

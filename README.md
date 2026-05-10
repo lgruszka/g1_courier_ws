@@ -58,10 +58,11 @@ zastosowania.
 - Unitree G1 (29-DoF) z włączonym `arm_sdk` i gotowym sport API
 - Livox Mid-360 zamontowany na głowie, USB do onboard PC
 - RealSense D435i w torsie, USB3
-- Dwa biurka (table A, table B) oznaczone AprilTagiem `tag36h11`:
-  - Table A → id `5`, długość boku 0.16 m, na przedniej krawędzi
-  - Table B → id `7`, ta sama family/size
-- Tekturowy karton z tagiem `id=10` na górnej ścianie (rozmiar 0.10 m)
+- Dwa biurka (table A, table B) — **bez AprilTagów na biurkach**.
+  Lokalizacja biurek tylko z mapy + LiDAR line fit (RANSAC na krawędzi).
+- Tekturowy karton z AprilTagiem `tag36h11` `id=10` na ścianie kartonu
+  (rozmiar 0.10 m) — to JEDYNY tag używany w systemie. Służy tylko do
+  precyzyjnego docka pod chwyt (`pick_box`).
 - Zapisana mapa 2D w `~/maps/lab.yaml` (zbudowana raz przez
   `mapping_real.launch.py`)
 - Skalibrowane waypoints w `src/g1_courier_mission/config/waypoints.yaml`
@@ -101,7 +102,8 @@ Co się dzieje, krok po kroku:
 1. AMCL ładuje `lab.yaml`, czeka na initial pose (jeśli nie zbiega
    automatycznie, ustaw "2D Pose Estimate" z RViz).
 2. Mission BT nawiguje do predocka biurka A.
-3. Dock APRILTAG → tag5 (30 cm), potem re-dock → box tag10 (17 cm).
+3. Dock APRILTAG → box tag10 (17 cm) — biurko nie ma własnego taga,
+   robot zbiega bezpośrednio do kartonu.
 4. `pick_box` wykonuje keyframes P0..P6, grasp verifier potwierdza
    skok τ.
 5. Włącza się carry mode — `cmd_vel_arbiter` obniża limity prędkości.
@@ -159,13 +161,16 @@ ros2 action send_goal /place_box g1_courier_msgs/action/PlaceBox \
   --feedback
 ```
 
-### Dock do biurka (tryb AprilTag)
+### Dock do kartonu (tryb AprilTag, tag10)
+
+W systemie używamy AprilTaga **tylko na kartonie** (id=10). Biurka nie
+mają tagów — pozycja biurek bierze się z mapy plus LIDAR_LINE.
 
 ```bash
 ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
-  '{mode: 0, apriltag_id: 5,
-    target_pose: {header: {frame_id: "tag_a"}},
-    xy_tolerance_m: 0.03, yaw_tolerance_rad: 0.05, timeout_s: 25.0}' \
+  '{mode: 0, apriltag_id: 10,
+    target_pose: {header: {frame_id: "tag_box"}},
+    xy_tolerance_m: 0.10, yaw_tolerance_rad: 0.15, timeout_s: 25.0}' \
   --feedback
 ```
 
@@ -326,13 +331,13 @@ innego skilla — kompozycja jest w mission BT.
 loop forever:
   set_carry_mode(off)
   navigate_to_pose(predock_table_A)        # nav2 + AMCL
-  dock_to_table(mode=APRILTAG, tag=A)      # 6-DoF visual servo
+  dock_to_box(mode=APRILTAG, tag=10)       # 6-DoF visual servo do tag10 na kartonie
   pick_box(box_pose_from_tag)              # parametryczna trajektoria ramion
   verify_grasp                             # próg τ
   set_carry_mode(on)                       # niższe vx/vyaw, mniejsze kroki
 
   navigate_to_pose(predock_table_B)        # nav2 + AMCL only
-  dock_to_table(mode=LIDAR_LINE, tag=B)    # kamera zasłonięta przez karton
+  dock_to_table(mode=LIDAR_LINE)           # kamera zasłonięta — RANSAC krawędź
   place_box(target_pose_from_lidar)        # parametryczne odłożenie
   verify_release
 
@@ -396,7 +401,7 @@ need to tune".
   sentinelem kinematic-mode (`mode==99`) dla sim.
 - Action serwery `PickBox` i `PlaceBox` z grasp verifierem.
 - Action server `DockToTable` ze wszystkimi trzema trybami:
-  - `MODE_APRILTAG` — 6-DoF PnP visual servo (tag biurka 5/7 lub box tag10)
+  - `MODE_APRILTAG` — 6-DoF PnP visual servo do tag10 na kartonie (tylko ten jeden tag)
   - `MODE_LIDAR_LINE` — RANSAC line fit na 2D scan, perpendicular alignment
     (gdy niesiony karton zasłania head_cam)
   - `MODE_AMCL_ONLY` — zaufanie AMCL (fallback)

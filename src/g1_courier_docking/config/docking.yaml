@@ -26,11 +26,10 @@ dock_action_server:
                                        # Suppresses PnP/IPPE noise without losing
                                        # the ability to correct genuine rotation
                                        # (real box placed at angle).
-    apriltag.target_distance_m: 0.30       # default for dock-to-table (table front edge tag).
+    apriltag.target_distance_m: 0.17       # box tag10 — palm-press alignment distance.
                                             # mission BT can override per-call via
-                                            # target_pose.pose.position.z (e.g. 0.17 for
-                                            # dock-to-box where tag10 is on box front face).
-    apriltag.tag_size_m: 0.16              # full edge length, matches mac scene tag plate
+                                            # target_pose.pose.position.z if needed.
+    apriltag.tag_size_m: 0.10              # box tag10 physical edge length (10 cm)
     # Fallback pinhole intrinsics used until mac side starts publishing
     # rt/camera_info. Values match the mac head_cam (fovy=60°, 640x480):
     # fx = fy = (H/2) / tan(fovy/2) = 240 / tan(30°) ≈ 415.69, cx=W/2, cy=H/2.
