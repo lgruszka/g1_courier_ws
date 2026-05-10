@@ -759,6 +759,59 @@ Reguły specyficzne dla projektu (nie z docs) są jasno oznaczone — głównie 
 
 ---
 
+## Appendix D: Sim vs Real — branch split
+
+Repo na GitLab (`gitlab.com/iAndy77/j2s`) trzyma **trzy orphan branche**:
+
+| Branch | Zawartość |
+|---|---|
+| `courier-sim` | Ubuntu native MuJoCo bridge + cały mission stack. Primary path dla zespołu. |
+| `courier-deploy` | Real Unitree G1 + Livox Mid-360 + RealSense D435i. Zero artefaktów sim. |
+| `courier-sim-legacy-mac` | Frozen snapshot poprzedniego setupu (mac MuJoCo + Linux Parallels VM, DDS bridge między hostami). Nie utrzymywany. |
+
+### Co zostaje wspólne (oba aktywne branche)
+
+- `g1_courier_msgs` — kontrakty action/srv/msg (API systemu).
+- `g1_courier_arm_skills` — pick / place action server + arm controller.
+- `g1_courier_docking` — dock action server (APRILTAG / LIDAR_LINE / AMCL).
+- `g1_courier_mission` — Behavior Tree, navigate_proxy, retreat.
+- `g1_courier_safety` — cmd_vel arbiter z carry mode + e-stop.
+- `g1_courier_bringup` — nav2 / slam_toolbox / apriltag / pointcloud_to_laserscan configi.
+- `tools/` — diagnostyczne podglądy (`cam_viewer`, `lidar_viewer`, `plan_viz`).
+
+### Co tylko na `courier-sim`
+
+- `src/g1_courier_sim/sim_bridge/` — Ubuntu native MuJoCo bridge (port mac code'u). TwoHandGrasp midpoint kinematic tracking, kinematic mocap movement, `mj_ray()` lidar, head_cam render z `pupil_apriltags`, hand-written CDR IDL bindings dla unitree_sdk2py.
+- `g1_courier_sim/launch/sim_bridge.launch.py` — odpalenie bridge'a.
+- `g1_courier_bringup/launch/phase1_full.launch.py` — sim mission stack.
+- `g1_courier_bringup/launch/mapping.launch.py` — sim mapping.
+- W `pick`/`place_action_server.py` publikacja `/parcel_state` (mac MuJoCo bridge konsumuje do detach weld).
+- Default `kinematic_mode=true` w sim launch params (sentinel `mode==99` w `/lowcmd`).
+
+### Co tylko na `courier-deploy`
+
+- `g1_courier_bringup/launch/real.launch.py` — real-robot mission stack.
+- `g1_courier_bringup/launch/mapping_real.launch.py` — real-robot mapping run.
+- `docs/deployment_guide.md` — hardware checklist, install, calibracja waypointów z mapy, troubleshooting.
+- Brak `g1_courier_sim` package'a w całości.
+- Brak publikacji `/parcel_state`, brak subskrypcji `/amcl_pose` w `place_action_server` — real ma fizyczne palce do release'u, nie weld constraint.
+- Default `kinematic_mode=false` (real motors PD via DDS).
+
+### Reguła zachowania spójności branchy
+
+Każda zmiana w warstwach Mission / Skills / Platform (czyli everything poza `g1_courier_sim` i sim-only launches) **musi trafić do obu aktywnych branchy**. Dryft między `courier-sim` i `courier-deploy` poza udokumentowanymi sim-only delta'mi jest bug-em, nie feature-em.
+
+Kolejność przy zmianach core'a:
+1. Implementuj plus testuj na `courier-sim` (szybki feedback loop z MuJoCo).
+2. Cherry-pick do `courier-deploy`, usuń sim-specific ślady jeśli się zakradły.
+3. Zwaliduj że `colcon build` przechodzi czysto na `courier-deploy` bez `g1_courier_sim`.
+
+### Dlaczego nie jeden branch z `if sim:` flagami
+
+Próbowane w starej paczce — kończy się gnijącymi gałęziami `if`, sim-only kod siedzącym w produkcyjnym deploy, oraz `import mujoco` failującym przy starcie real-robot node'a. Branch split trzyma rozdzielone artefakty dyscyplinarnie, kosztem cherry-pick ceremony. Wartość: real deploy nie ma żadnej linii sim code'u, ergo żadnego ryzyka że sim sentinel typu `kinematic_mode==True` przedostanie się na motors prawdziwego G1.
+
+---
+
 ## Wersjonowanie tego dokumentu
 
 Jak zmieniasz architekturę:

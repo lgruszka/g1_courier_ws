@@ -9,8 +9,6 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.action.server import ServerGoalHandle
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from geometry_msgs.msg import PoseWithCovarianceStamped
-from std_msgs.msg import String
 
 from g1_courier_msgs.action import PlaceBox
 
@@ -48,15 +46,6 @@ class PlaceActionServer(Node):
             controller_config=cfg,
         )
 
-        # Sim parcel detach signal — mac MuJoCo bridge subscribes to /parcel_state
-        # and on "on_table_X" deactivates weld + repositions parcel onto target
-        # table surface. Activated at start of 'retract' stage (after release_height
-        # has lowered hands to table level). Inferred X from latest AMCL pose.
-        self._parcel_state_pub = self.create_publisher(String, '/parcel_state', 10)
-        self._latest_amcl: PoseWithCovarianceStamped | None = None
-        self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose',
-                                 self._on_amcl, 10)
-
         self._busy_lock = threading.Lock()
         self._action_server = ActionServer(
             self,
@@ -67,18 +56,6 @@ class PlaceActionServer(Node):
             cancel_callback=self._cancel,
         )
         self.get_logger().info('place_action_server ready on /place_box')
-
-    def _on_amcl(self, msg: PoseWithCovarianceStamped) -> None:
-        self._latest_amcl = msg
-
-    def _which_table(self) -> str:
-        """Pick closest table from latest AMCL pose. Defaults to 'on_table_a'
-        if AMCL has not published yet (e.g. real robot without nav2 stack)."""
-        if self._latest_amcl is None:
-            return 'on_table_a'
-        x = float(self._latest_amcl.pose.pose.position.x)
-        # tables at world x=1.5 (A) and x=4.0 (B)
-        return 'on_table_a' if abs(x - 1.5) < abs(x - 4.0) else 'on_table_b'
 
     def _goal(self, _request) -> GoalResponse:
         # Busy check happens in _execute via acquire(blocking=False); see ARCH §11.
@@ -109,16 +86,6 @@ class PlaceActionServer(Node):
             fb.phase = label
             fb.progress = float(progress)
             goal_handle.publish_feedback(fb)
-            # Release parcel weld at start of 'retract' — release_height has
-            # just finished lowering hands to ~table level, parcel sits on
-            # surface; mac flips eq_active=0 + repositions parcel via freejoint
-            # qpos to known table center.
-            if label == 'retract':
-                which = self._which_table()
-                msg = String()
-                msg.data = which
-                self._parcel_state_pub.publish(msg)
-                self.get_logger().info(f'parcel_state -> {which}')
 
         try:
             # Tell any other arm server (pick) to release its hold thread

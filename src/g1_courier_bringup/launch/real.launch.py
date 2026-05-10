@@ -1,17 +1,22 @@
-"""Launches the full courier stack:
+"""Real-robot full courier stack.
 
-- pointcloud_to_laserscan (Mid360 -> /scan)
+- pointcloud_to_laserscan (Livox Mid-360 -> /scan)
 - nav2 bringup with AMCL on a known map
-- apriltag_ros detector
+- apriltag_ros detector (RealSense D435i)
 - cmd_vel arbiter
 - dock action server
 - pick / place action servers
 - navigate_proxy + retreat action server
 - mission_node (BT)
 
-The unitree bridges (`unitree_cmd_vel_bridge_node`, sport API consumer of /cmd_vel)
-are NOT launched here - bring them up from the existing j2s-light_tracking
-package or vendor them in later.
+This launch assumes the Unitree firmware-side bridges are already running:
+  - sport API consumer of /cmd_vel (firmware side, proprietary)
+  - /lowstate publisher and /arm_sdk subscriber (firmware DDS bridge)
+  - Livox driver publishing /livox/lidar
+  - RealSense D435i driver publishing /camera/color/image_raw + /camera/color/camera_info
+
+Sim equivalent: `g1_courier_sim/launch/sim_bridge.launch.py` (separate branch
+`courier-sim`).
 """
 from __future__ import annotations
 

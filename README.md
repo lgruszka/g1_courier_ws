@@ -124,14 +124,21 @@ This repo lives on three branches on the team GitLab (`gitlab.com/iAndy77/j2s`):
 
 Choose the branch matching your target.
 
-## Running (sim — `courier-sim` branch)
+## Running (real robot — this branch)
 
-### 1. Install Ubuntu native sim deps
+This is the `courier-deploy` branch. For the sim path, switch to
+`courier-sim` (Ubuntu native MuJoCo) — see Branches above.
 
-See `docs/sim_setup_ubuntu.md` for the full procedure (one-time).
-TL;DR: `pip install mujoco unitree_sdk2py pupil-apriltags pygame opencv-python`,
-clone upstream `unitree_mujoco` for G1 mesh STL files, symlink them into
-`src/g1_courier_sim/g1_courier_sim/sim_bridge/assets/meshes`.
+### 1. Prerequisites
+
+See `docs/deployment_guide.md` for the full hardware + software checklist.
+Required at minimum:
+
+- Unitree G1 with `arm_sdk` + sport API firmware bridges running
+- Livox Mid-360 driver publishing `/livox/lidar` (PointCloud2)
+- RealSense D435i driver publishing `/camera/color/image_raw` + `/camera/color/camera_info`
+- Saved 2D map at `~/maps/lab.yaml` (build with `mapping_real.launch.py`)
+- Calibrated waypoints in `src/g1_courier_mission/config/waypoints.yaml`
 
 ### 2. Build
 
@@ -141,45 +148,39 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-### 3. Run sim
-
-Two terminals:
+### 3. Run mission
 
 ```bash
-# Terminal 1 — MuJoCo bridge (opens viewer)
-ros2 launch g1_courier_sim sim_bridge.launch.py
-
-# Terminal 2 — full mission stack (nav2 + dock + arm + mission BT)
-ros2 launch g1_courier_bringup phase1_full.launch.py
+ros2 launch g1_courier_bringup real.launch.py map:=$HOME/maps/lab.yaml
 ```
 
-### 4. Optional — diagnostic viewers
+### 4. Build a map (one-off, before first mission run)
 
 ```bash
-python3 tools/cam_viewer.py     # head_cam preview + AprilTag overlays
-python3 tools/lidar_viewer.py   # 2D top-down /scan + RANSAC line fit
-python3 tools/plan_viz.py       # nav2 plan + AMCL pose + costmap inflation
-```
-
-### 5. Build a custom map (optional, one-off)
-
-```bash
-ros2 launch g1_courier_bringup mapping.launch.py
-# Drive teleop, e.g. ros2 run teleop_twist_keyboard teleop_twist_keyboard
+ros2 launch g1_courier_bringup mapping_real.launch.py
+# Drive the robot manually with teleop:
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+# Save:
 ros2 run nav2_map_server map_saver_cli -f ~/maps/lab
-# Then update phase1_full.launch.py 'map' arg to point at your new map.yaml.
 ```
 
-### 6. Single-skill debug
+Then update `waypoints.yaml` from the new map — see
+`docs/deployment_guide.md` § "Calibrate waypoints from map".
+
+### 5. Single-skill debug
 
 ```bash
 ros2 action send_goal /pick_box g1_courier_msgs/action/PickBox "{}"
 ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable "{...}"
 ```
 
-## Running (real robot — `courier-deploy` branch)
+### 6. Optional — diagnostic viewers
 
-See `docs/deployment_guide.md` on that branch.
+```bash
+python3 tools/cam_viewer.py     # head_cam preview + AprilTag overlays
+python3 tools/lidar_viewer.py   # 2D top-down /scan + RANSAC line fit
+python3 tools/plan_viz.py       # nav2 plan + AMCL pose + costmap inflation
+```
 
 ## What is implemented
 
@@ -200,13 +201,6 @@ See `docs/deployment_guide.md` on that branch.
   pauses between stages.
 - nav2 stack: AMCL OmniMotionModel + NavfnPlanner A\* + RotationShim →
   RegulatedPurePursuit + costmaps with obstacle/inflation layers.
-- Linux-native MuJoCo bridge in `g1_courier_sim/sim_bridge/`:
-  - `TwoHandGrasp` midpoint kinematic tracking (replaces single-hand weld)
-  - kinematic mocap movement (welded pelvis + cmd_vel integration)
-  - 360° lidar via `mj_ray()`
-  - head_cam render + `pupil_apriltags` detection + image publish
-  - `reset_all` payload for clean iteration loops
-  - 1 Hz GEOM diagnostic log
 
 ## Required external dependencies
 
@@ -217,21 +211,18 @@ ros-jazzy-slam-toolbox
 ros-jazzy-pointcloud-to-laserscan
 ros-jazzy-py-trees-ros
 ros-jazzy-rosidl-generator-dds-idl
+ros-jazzy-apriltag-ros
 ros-jazzy-apriltag-msgs
 ros-jazzy-tf2-geometry-msgs
-```
-
-pip (sim only — Ubuntu native MuJoCo bridge):
-```
-mujoco
-unitree_sdk2py
-pupil-apriltags
-pygame
-opencv-python
+ros-jazzy-realsense2-camera
 ```
 
 ROS2 source (clone into `src/`):
 ```
-unitree_ros2  (provides unitree_hg, unitree_api, unitree_go message types)
-              https://github.com/unitreerobotics/unitree_ros2
+unitree_ros2          unitree_hg / unitree_api / unitree_go IDLs
+                      https://github.com/unitreerobotics/unitree_ros2
+unitree_ros           g1_description URDF + meshes (master branch)
+                      https://github.com/unitreerobotics/unitree_ros
+livox_ros_driver2     Livox Mid-360 driver
+                      https://github.com/Livox-SDK/livox_ros_driver2
 ```
