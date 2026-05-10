@@ -5,6 +5,22 @@ Unitree G1 with Livox Mid-360 and RealSense D435i.
 
 > Sim users: this guide does not apply. Switch to `courier-sim` branch.
 
+## Reading order for first-time use
+
+If you've never deployed this stack on a real robot before, follow the
+sections in this order — each builds on the previous:
+
+1. [Hardware checklist](#hardware-checklist) — verify every box ticks
+2. [Software install (one-time)](#software-install-one-time) — packages, repo, drivers
+3. [Day 1 walkthrough](#day-1-walkthrough) — your first 60 minutes with the robot
+4. [Build a map](#build-a-map-once-per-lab-layout) — slam_toolbox + Livox slice
+5. [Calibrate waypoints from map](#calibrate-waypoints-from-map) — RViz pick-points
+6. [First mission run](#first-mission-run) — full A↔B cycle
+7. [Troubleshooting](#troubleshooting) — when things break
+
+If you've already done install + map + calibration on a previous visit,
+skip straight to [First mission run](#first-mission-run).
+
 ## Hardware checklist
 
 - [ ] Unitree G1 (29-DoF) with `arm_sdk` enabled and sport API ready
@@ -77,6 +93,94 @@ ros2 topic hz /lowstate           # expect ~500 Hz
 ros2 topic list | grep livox      # /livox/lidar
 ros2 topic list | grep camera     # /camera/color/image_raw
 ```
+
+## Day 1 walkthrough
+
+Concrete sequence for your first session at the lab. Assumes the
+[hardware](#hardware-checklist) plus [software install](#software-install-one-time)
+are done.
+
+### Minute 0–10: bring up the platform
+
+1. Power on the G1 and let it stand. Verify it's in damping mode (zero
+   torque, joints free).
+2. Plug Livox + RealSense USB to onboard PC.
+3. Start the firmware bridge (proprietary, sport API). Confirm:
+   ```bash
+   ros2 topic hz /lowstate          # ~500 Hz
+   ros2 topic list | grep -E 'livox|camera'
+   # /livox/lidar  /camera/color/image_raw  /camera/color/camera_info
+   ```
+4. From your dev laptop on the same network:
+   ```bash
+   export ROS_DOMAIN_ID=<same as robot>
+   ros2 topic list   # should see all of the above
+   ```
+
+### Minute 10–25: smoke-test individual components
+
+Don't run the mission yet — verify each piece works in isolation. Open
+4 terminals on your dev laptop. In each one source the workspace:
+```bash
+source ~/g1_courier_ws/install/setup.bash
+```
+
+**Terminal 1** — sensors visualised:
+```bash
+python3 ~/g1_courier_ws/tools/cam_viewer.py
+# Check: image arrives, exposure OK, you can see the lab in front of the robot.
+```
+
+**Terminal 2** — LiDAR slice:
+```bash
+ros2 launch g1_courier_bringup mapping_real.launch.py
+# In another terminal:
+python3 ~/g1_courier_ws/tools/lidar_viewer.py
+# Check: 360° scan visible, walls/desks readable, no obvious gaps.
+```
+
+If the lidar slice is empty or sparse, your `min_height/max_height`
+in `bringup/config/pointcloud_to_laserscan.yaml` doesn't match the
+Livox mount height. The defaults assume Livox at ~1.45 m AGL on the
+G1 head.
+
+**Terminal 3** — manual drive test:
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+Use sparingly — push w/x at small speeds (`0.1 m/s`). Confirm the
+robot translates as commanded. **Stop teleop before continuing.**
+
+**Terminal 4** — kill `mapping_real.launch.py` from terminal 2 with
+`Ctrl+C` once everything above looks good.
+
+### Minute 25–45: build the map
+
+```bash
+ros2 launch g1_courier_bringup mapping_real.launch.py
+# In a separate terminal:
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+ros2 run rviz2 rviz2
+# Add → Map → topic /map. Watch the map fill in as you drive.
+```
+
+Drive the robot through the full lab layout: pass each table front,
+each transit corridor, both directions. Slow steady speed (~0.2 m/s)
+gives the cleanest map.
+
+When the map looks complete:
+```bash
+ros2 run nav2_map_server map_saver_cli -f ~/maps/lab
+```
+
+You now have `~/maps/lab.pgm` + `~/maps/lab.yaml`.
+
+### Minute 45–60: calibrate waypoints
+
+See [Calibrate waypoints from map](#calibrate-waypoints-from-map)
+below — clicks through RViz, edit `waypoints.yaml`, takes ~10 minutes.
+
+After this, you're ready for [First mission run](#first-mission-run).
 
 ## Build a map (once per lab layout)
 
@@ -169,19 +273,181 @@ Expected sequence:
 8. `place_box` runs P5..P0 → `release_verified=true`
 9. Retreat 0.5 m, swap A/B, repeat
 
-Fail signs and where to look:
+## Troubleshooting
 
-- **AMCL pose drifts**: re-record map, increase coverage in transit area
-- **`grasp_verified=false`**: retune `grasp_tau_threshold_nm` in
-  `src/g1_courier_arm_skills/config/arm_skills.yaml`. Real value depends
-  on box weight — start at 1.5, raise if false negatives.
-- **Dock APRILTAG never converges**: check `head_cam` actually publishes
-  rectified image (`image_rect`); verify intrinsics in `camera_info`
-  match D435i factory values
-- **Dock LIDAR_LINE wanders**: increase RANSAC inlier threshold or narrow
-  the forward window in `src/g1_courier_docking/config/docking.yaml`
-- **Robot wobbles in carry mode**: tighten `max_v*_carry` in
-  `safety.yaml`
+Each entry: **symptom** → diagnostic command → likely cause → fix.
+
+### `colcon build` fails with `unitree_hg` not found
+```bash
+ls src/unitree_ros2/unitree_hg     # should exist
+```
+- **Cause**: `unitree_ros2` not cloned, or `example/COLCON_IGNORE` missing
+  causing the example pkg to fail.
+- **Fix**: clone per § "Workspace + sources"; `touch src/unitree_ros2/example/COLCON_IGNORE`.
+
+### `ros2 topic list` doesn't show `/lowstate` or `/livox/lidar`
+```bash
+echo $ROS_DOMAIN_ID                # must match robot
+ros2 daemon stop && ros2 daemon start
+ros2 topic list
+```
+- **Cause**: domain ID mismatch, daemon stale, or firmware bridge not running.
+- **Fix**: align `ROS_DOMAIN_ID` between robot and dev laptop, restart daemon.
+
+### AMCL doesn't converge (robot icon stays at origin or drifts)
+```bash
+ros2 topic echo /amcl_pose --once   # check covariance and pose
+ros2 topic hz /scan                 # should be ~10 Hz
+ros2 run tf2_tools view_frames      # confirm map → odom → base_link
+```
+- **Cause 1**: no initial pose set.
+  **Fix**: in RViz click "2D Pose Estimate", drag arrow on the map at robot's actual location.
+- **Cause 2**: scan empty or very sparse.
+  **Fix**: check `pointcloud_to_laserscan.yaml` slice heights match
+  Livox mount; check `/livox/lidar` is publishing.
+- **Cause 3**: poor map coverage.
+  **Fix**: re-record map, walk through the transit area more thoroughly.
+
+### Dock APRILTAG never converges
+```bash
+ros2 topic echo /detections --once   # tag id 5 or 7 visible?
+python3 tools/cam_viewer.py          # visual check of bbox
+```
+- **Cause 1**: tag out of camera FoV from current predock pose.
+  **Fix**: edit `predock_x/y/yaw` in `waypoints.yaml` so the tag is
+  centred. Use cam_viewer to verify.
+- **Cause 2**: D435i image is unrectified or `camera_info` has wrong
+  intrinsics.
+  **Fix**: ensure `realsense2_camera` publishes `image_rect`; verify
+  `camera_info` matches D435i factory values (`fx ≈ 615`, `fy ≈ 615`,
+  `cx ≈ 320`, `cy ≈ 240` for 640×480).
+- **Cause 3**: lighting or motion blur.
+  **Fix**: increase exposure, slow down dock approach, raise tag size.
+
+### `grasp_verified=false` on every pick
+```bash
+ros2 topic echo /lowstate --field motor_state[<arm_idx>].tau_est
+```
+- **Cause**: `grasp_tau_threshold_nm` in `arm_skills.yaml` doesn't
+  match real box weight + arm pose.
+- **Fix**: capture baseline τ before pick, capture τ after lift,
+  set threshold to 60% of the difference. Default 1.5 Nm is for ~1 kg
+  box; scale linearly.
+
+### Dock LIDAR_LINE wanders / never settles
+```bash
+python3 tools/lidar_viewer.py
+# Drive to predock manually, watch the green RANSAC line.
+```
+- **Cause 1**: forward window too wide, aligner picking up obstacles
+  beside the table.
+  **Fix**: narrow `lidar_line.window_*` in `docking.yaml`.
+- **Cause 2**: RANSAC inliers too loose, fitting noise.
+  **Fix**: tighten `lidar_line.inlier_threshold_m`.
+- **Cause 3**: wrong sign on yaw correction (was a known bug — see
+  CLAUDE.md "Dock LIDAR_LINE timeout").
+  **Fix**: verify `cmd.angular.z = +kp * yaw_err` in `LidarLineAligner`.
+
+### Robot wobbles in carry mode (oscillates while walking)
+```bash
+ros2 topic echo /cmd_vel --once     # see what arbiter is publishing
+```
+- **Cause**: carry-mode velocity caps too high for current box weight.
+- **Fix**: tighten `max_vx_carry`, `max_vy_carry`, `max_vyaw_carry` in
+  `safety/config/safety.yaml`. Start with `0.2 / 0.1 / 0.3`.
+
+### Mission BT loops the same phase forever
+```bash
+ros2 topic echo /mission_status --once
+ros2 node info /mission_node
+```
+- **Cause**: a phase keeps timing out (e.g. dock A timeout on return
+  leg because head_cam is occluded by the carried box).
+- **Fix**: ensure `dock_mode: lidar_line` is set on the **return leg**
+  table in `waypoints.yaml`. Both `table_a` and `table_b` should be
+  `lidar_line` to be carry-independent.
+
+### `nav2 controller "Passing new path" but robot stands still`
+```bash
+ros2 topic hz /cmd_vel              # 0 Hz means nothing reaches firmware
+ros2 topic hz /cmd_vel_nav          # 10 Hz means nav2 IS publishing
+```
+- **Cause**: jazzy `nav2_bringup` remaps `cmd_vel` → `cmd_vel_nav`.
+  Without `cmd_vel_arbiter` running in merge mode, the nav output
+  goes nowhere.
+- **Fix**: confirm `cmd_vel_arbiter` is running and subscribed to
+  `/cmd_vel_nav`. `real.launch.py` does this for you.
+
+### Old fail-recipes worth keeping in mind
+Read `CLAUDE.md` § "Najczęstsze problemy które mogą wystąpić" — full
+catalogue of bugs encountered during sim development. Most are
+sim-specific (mac bridge, MuJoCo zombies) but a few apply to the real
+robot too: NavfnPlanner tolerance, APRILTAG `dyaw` sign, LiDAR_LINE
+yaw sign.
+
+## Action contracts cheat sheet
+
+When firing actions manually for debug, use these payloads as
+templates. Full IDL: `src/g1_courier_msgs/{action,srv}/`.
+
+```bash
+# /pick_box  — nominal P0..P6 keyframes:
+ros2 action send_goal /pick_box g1_courier_msgs/action/PickBox \
+  '{box_pose: {header: {frame_id: ""}}, sequence_name: "pick_box", timeout_s: 30.0}' \
+  --feedback
+
+# /place_box  — nominal P5..ZERO:
+ros2 action send_goal /place_box g1_courier_msgs/action/PlaceBox \
+  '{target_pose: {header: {frame_id: ""}}, sequence_name: "place_box", timeout_s: 30.0}' \
+  --feedback
+
+# /dock_to_table APRILTAG (tag5):
+ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
+  '{mode: 0, apriltag_id: 5,
+    target_pose: {header: {frame_id: "tag_a"}},
+    xy_tolerance_m: 0.03, yaw_tolerance_rad: 0.05, timeout_s: 25.0}' \
+  --feedback
+
+# /dock_to_table LIDAR_LINE (predock at world (4.10, 0, 0)):
+ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
+  '{mode: 1, apriltag_id: 0,
+    target_pose: {header: {frame_id: "map"},
+                  pose: {position: {x: 4.10, y: 0.0, z: 0.0}}},
+    xy_tolerance_m: 0.03, yaw_tolerance_rad: 0.05, timeout_s: 25.0}' \
+  --feedback
+
+# /courier/navigate_to_pose (predock_a at (1.42, 0, 0) facing +X):
+ros2 action send_goal /courier/navigate_to_pose \
+  g1_courier_msgs/action/NavigateToPose \
+  '{target_pose: {header: {frame_id: "map"},
+                  pose: {position: {x: 1.42, y: 0.0, z: 0.0},
+                         orientation: {w: 1.0}}},
+    waypoint_name: "predock_a",
+    xy_tolerance_m: 0.0, yaw_tolerance_rad: 0.0, timeout_s: 60.0}' \
+  --feedback
+
+# /retreat — open-loop reverse 0.5 m at 0.15 m/s:
+ros2 action send_goal /retreat g1_courier_msgs/action/Retreat \
+  '{distance_m: 0.5, speed_mps: 0.15, timeout_s: 10.0}' \
+  --feedback
+
+# /safety/set_carry_mode — engage carry-mode caps:
+ros2 service call /safety/set_carry_mode g1_courier_msgs/srv/SetCarryMode \
+  '{carrying: true}'
+
+# /safety/set_freeze — emergency freeze (zero cmd_vel):
+ros2 service call /safety/set_freeze g1_courier_msgs/srv/SetFreeze \
+  '{freeze: true}'
+```
+
+To **cancel** an action mid-flight: `Ctrl+C` in the `send_goal`
+terminal. The action server respects cancel and stops cleanly.
+
+To **list** all available actions:
+```bash
+ros2 action list
+ros2 action info /pick_box        # shows server + client(s)
+```
 
 ## Configs that you may need to tune
 
