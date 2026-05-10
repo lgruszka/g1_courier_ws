@@ -29,7 +29,7 @@ __pycache__/
 src/unitree_ros2/example/
 
 # saved maps (binary, may be large; keep yamls if they are useful)
-maps/*.pgm
+#maps/*.pgm
 
 # local sensitive
 .env
