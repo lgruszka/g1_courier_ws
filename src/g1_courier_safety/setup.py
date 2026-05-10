@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'cmd_vel_arbiter = g1_courier_safety.cmd_vel_arbiter:main',
+            'lowstate_to_joint_states = g1_courier_safety.lowstate_to_joint_states:main',
         ],
     },
 )

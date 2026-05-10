@@ -12,8 +12,17 @@
 This launch assumes the Unitree firmware-side bridges are already running:
   - sport API consumer of /cmd_vel (firmware side, proprietary)
   - /lowstate publisher and /arm_sdk subscriber (firmware DDS bridge)
-  - Livox driver publishing /livox/lidar
+  - Livox PointCloud2 published by Unitree firmware (default
+    /utlidar/cloud_livox_360mid; override via launch arg cloud_topic)
   - RealSense D435i driver publishing /camera/color/image_raw + /camera/color/camera_info
+
+This launch wires the missing TF pieces that the firmware does not
+provide:
+  - robot_state_publisher loads G1 URDF -> base_link → body links TF
+  - lowstate_to_joint_states converts /lowstate -> /joint_states so RSP
+    has live angles
+  - static_transform_publisher base_link -> lidar_frame (override via
+    lidar_xyz / lidar_frame_id launch args; defaults assume Mid-360 on head)
 
 Sim equivalent: `g1_courier_sim/launch/sim_bridge.launch.py` (separate branch
 `courier-sim`).
@@ -26,8 +35,9 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node, SetRemap
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -40,20 +50,72 @@ def generate_launch_description() -> LaunchDescription:
     nav2_params = LaunchConfiguration('nav2_params')
     map_yaml = LaunchConfiguration('map')
 
+    default_urdf = os.path.expanduser(
+        '~/g1_courier_ws/src/unitree_ros/robots/g1_description/g1_29dof.urdf'
+    )
+
+    robot_description = ParameterValue(
+        Command(['xacro ', LaunchConfiguration('urdf_path')]),
+        value_type=str,
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('nav2_params',
             default_value=os.path.join(bringup, 'config', 'nav2_params.yaml')),
         DeclareLaunchArgument('map',
             default_value=os.path.join(bringup, 'maps', 'lab.yaml'),
             description='Saved 2D map for AMCL.'),
+        DeclareLaunchArgument('urdf_path', default_value=default_urdf,
+            description='Absolute path to G1 URDF (from unitree_ros/robots/g1_description).'),
+        DeclareLaunchArgument('cloud_topic', default_value='/utlidar/cloud_livox_360mid',
+            description='PointCloud2 source topic (Unitree firmware default).'),
+        DeclareLaunchArgument('lidar_frame_id', default_value='utlidar_lidar',
+            description='frame_id stamped by Unitree firmware on lidar messages.'),
 
-        # Sensors -> 2D scan.
+        # robot_state_publisher: TF from base_link to every URDF link.
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            parameters=[{'robot_description': robot_description}],
+        ),
+
+        # /lowstate -> /joint_states adapter so robot_state_publisher
+        # has live joint angles to compute TF.
+        Node(
+            package='g1_courier_safety',
+            executable='lowstate_to_joint_states',
+            name='lowstate_to_joint_states',
+        ),
+
+        # Static TF base_link -> lidar frame. Unitree firmware does NOT
+        # publish this. Default assumes Mid-360 on G1 head ~1.45 m above
+        # pelvis. MEASURE PHYSICALLY and override if wrong.
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_tf_lidar',
+            arguments=[
+                '--x', '0.0', '--y', '0.0', '--z', '1.45',
+                '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0',
+                '--frame-id', 'base_link',
+                '--child-frame-id', LaunchConfiguration('lidar_frame_id'),
+            ],
+        ),
+
+        # Sensors -> 2D scan. Bumped input_queue_size from default 10 —
+        # Livox publishes large clouds; default queue overruns under TF
+        # lookup latency.
         Node(
             package='pointcloud_to_laserscan',
             executable='pointcloud_to_laserscan_node',
             name='pointcloud_to_laserscan',
-            parameters=[os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml')],
-            remappings=[('cloud_in', '/livox/lidar'), ('scan', '/scan')],
+            parameters=[
+                os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
+                {'input_queue_size': 50},
+            ],
+            remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
+                        ('scan', '/scan')],
         ),
 
         # AprilTag detector.

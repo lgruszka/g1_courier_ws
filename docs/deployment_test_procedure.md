@@ -158,6 +158,23 @@ mkdir -p ~/maps
 ros2 launch g1_courier_bringup mapping_real.launch.py
 ```
 
+**Domyślne wartości** (jeśli twój robot ma inny setup, override przez
+launch args):
+- `cloud_topic:=/utlidar/cloud_livox_360mid` — topic Unitree firmware
+- `lidar_frame_id:=utlidar_lidar` — frame_id chmury (sprawdź:
+  `ros2 topic echo <cloud_topic> --field header.frame_id --once`)
+- `urdf_path:=$HOME/g1_courier_ws/src/unitree_ros/robots/g1_description/g1_29dof.urdf`
+- statyczne TF `base_link → lidar` z xyz=(0, 0, 1.45) m — zmierz
+  fizycznie wysokość Livoxa, jeśli inna, edytuj launch lub dodaj
+  override (na razie hardkoded — można wynieść do launch arg później)
+
+Przykład z customowymi:
+```bash
+ros2 launch g1_courier_bringup mapping_real.launch.py \
+    cloud_topic:=/livox/lidar \
+    lidar_frame_id:=livox_frame
+```
+
 **Checkpoint**: w logu widzisz `slam_toolbox` przechodzący do `active`,
 brak traceback'ów.
 
