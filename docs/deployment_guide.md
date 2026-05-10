@@ -63,9 +63,9 @@ ln -s courier/src/* .
 git clone https://github.com/unitreerobotics/unitree_ros2
 touch unitree_ros2/example/COLCON_IGNORE
 
-# URDF G1 + meshes (master branch — NIE unitree_ros2)
-git clone https://github.com/unitreerobotics/unitree_ros
-# Użyj unitree_ros/robots/g1_description dla robot_state_publisher.
+# URDF G1 + meshes są wbudowane w nasze repo jako pakiet g1_description
+# (vendored ~19 MB subset — buduje się automatycznie przy colcon build).
+# Nie potrzebujesz osobnego clone'a unitree_ros.
 
 # Sterownik Livox
 git clone https://github.com/Livox-SDK/livox_ros_driver2

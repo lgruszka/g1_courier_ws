@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>g1_description</name>
+  <version>0.1.0</version>
+  <description>
+    Unitree G1 (29-DoF) URDF + STL meshes — vendored subset of
+    unitree_ros/robots/g1_description. Used by robot_state_publisher
+    for TF and by RViz for the 3D RobotModel display. Mesh paths use
+    package://g1_description/meshes/ so the URDF is portable.
+  </description>
+  <maintainer email="lukasz.gruszka90@gmail.com">Lukasz Gruszka</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -51,8 +51,9 @@ def generate_launch_description() -> LaunchDescription:
     nav2_params = LaunchConfiguration('nav2_params')
     map_yaml = LaunchConfiguration('map')
 
-    default_urdf = os.path.expanduser(
-        '~/g1_courier_ws/src/unitree_ros/robots/g1_description/g1_29dof.urdf'
+    default_urdf = os.path.join(
+        get_package_share_directory('g1_description'),
+        'urdf', 'g1_29dof.urdf',
     )
 
     robot_description = ParameterValue(
@@ -90,18 +91,24 @@ def generate_launch_description() -> LaunchDescription:
             description='Publish odom->base_link TF from odometry topic.',
         ),
         DeclareLaunchArgument('urdf_path', default_value=default_urdf,
-            description='Absolute path to G1 URDF (from unitree_ros/robots/g1_description).'),
+            description='Absolute path to G1 URDF. Default uses the vendored '
+                        'g1_description package; override to point elsewhere.'),
+        DeclareLaunchArgument('enable_robot_model', default_value='true',
+            description='Start robot_state_publisher + lowstate_to_joint_states '
+                        'for TF and RViz RobotModel. Set false for headless/minimal runs.'),
         DeclareLaunchArgument('cloud_topic', default_value='/utlidar/cloud_livox_360mid',
             description='PointCloud2 source topic (Unitree firmware default).'),
         DeclareLaunchArgument('lidar_frame_id', default_value='utlidar_lidar',
             description='frame_id stamped by Unitree firmware on lidar messages.'),
 
         # robot_state_publisher: TF from base_link to every URDF link.
+        # Gated on enable_robot_model — set false if URDF missing.
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
             name='robot_state_publisher',
             parameters=[{'robot_description': robot_description}],
+            condition=IfCondition(LaunchConfiguration('enable_robot_model')),
         ),
 
         # /lowstate -> /joint_states adapter so robot_state_publisher
@@ -110,6 +117,7 @@ def generate_launch_description() -> LaunchDescription:
             package='g1_courier_safety',
             executable='lowstate_to_joint_states',
             name='lowstate_to_joint_states',
+            condition=IfCondition(LaunchConfiguration('enable_robot_model')),
         ),
 
         # Static TF base_link -> lidar frame. Unitree firmware does NOT
@@ -135,10 +143,8 @@ def generate_launch_description() -> LaunchDescription:
             executable='pointcloud_to_laserscan_node',
             name='pointcloud_to_laserscan',
             parameters=[
-                
                 os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
                 {'input_queue_size': 50},
-            ,
                 {'target_frame': base_frame},
             ],
             remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),

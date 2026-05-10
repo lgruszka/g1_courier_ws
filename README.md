@@ -266,10 +266,17 @@ AMCL pose, TF):
 rviz2 -d $(ros2 pkg prefix g1_courier_bringup)/share/g1_courier_bringup/rviz/courier.rviz
 ```
 
-Działa zarówno z `real.launch.py` (real robot) jak i `phase1_full.launch.py`
-(sim) — oba publikują `/robot_description` przez `robot_state_publisher`
-plus `/joint_states` przez `lowstate_to_joint_states`. Wymaga sklonowanego
-`unitree_ros` w `src/` (URDF G1).
+Działa od razu po `colcon build`. URDF G1 + meshes wbudowane jako pakiet
+`g1_description` w naszym repo. `real.launch.py` domyślnie startuje
+`robot_state_publisher` + `lowstate_to_joint_states` adapter, dzięki
+czemu RViz dostaje na żywo TF od robota.
+
+Jeśli URDF jest niedostępne lub chcesz odpalić bez modelu (headless,
+debug):
+```bash
+ros2 launch g1_courier_bringup real.launch.py enable_robot_model:=false
+```
+Slam, dock, nav2 nadal działają — znika tylko wizualizacja modelu.
 
 W RViz: **Fixed Frame: map** (default w presecie). Przełącz na `base_link`
 jeśli chcesz local view robota podczas docka.
@@ -452,11 +459,12 @@ ROS2 source (clone do `src/`):
 ```
 unitree_ros2          IDLs unitree_hg / unitree_api / unitree_go
                       https://github.com/unitreerobotics/unitree_ros2
-unitree_ros           URDF g1_description + meshes (master branch)
-                      https://github.com/unitreerobotics/unitree_ros
 livox_ros_driver2     Sterownik Livox Mid-360
                       https://github.com/Livox-SDK/livox_ros_driver2
 ```
+
+(URDF G1 jest wbudowany w repo jako pakiet `g1_description` — nie
+trzeba klonować `unitree_ros` osobno.)
 
 ## Indeks dokumentacji
 

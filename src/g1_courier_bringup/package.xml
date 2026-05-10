@@ -12,6 +12,7 @@
   <exec_depend>g1_courier_docking</exec_depend>
   <exec_depend>g1_courier_mission</exec_depend>
   <exec_depend>g1_courier_safety</exec_depend>
+  <exec_depend>g1_description</exec_depend>
   <!-- Heavy ROS dependencies pulled at runtime, not at build: -->
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>

@@ -163,7 +163,9 @@ launch args):
 - `cloud_topic:=/utlidar/cloud_livox_360mid` — topic Unitree firmware
 - `lidar_frame_id:=utlidar_lidar` — frame_id chmury (sprawdź:
   `ros2 topic echo <cloud_topic> --field header.frame_id --once`)
-- `urdf_path:=$HOME/g1_courier_ws/src/unitree_ros/robots/g1_description/g1_29dof.urdf`
+- `urdf_path:=` — domyślnie `g1_description` package (vendored URDF G1)
+- `enable_robot_model:=true|false` — gate dla RSP + adapter
+  (set `false` jeśli URDF brak lub robi się minimalny test)
 - statyczne TF `base_link → lidar` z xyz=(0, 0, 1.45) m — zmierz
   fizycznie wysokość Livoxa, jeśli inna, edytuj launch lub dodaj
   override (na razie hardkoded — można wynieść do launch arg później)
