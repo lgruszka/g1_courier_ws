@@ -1,118 +1,124 @@
 # g1_courier_ws
 
-ROS2 stack for a Unitree G1 humanoid carrying a box between two desks
-marked with AprilTags.
+Stack ROS2 dla humanoida Unitree G1 — przenoszenie kartonu między dwoma
+biurkami oznaczonymi AprilTagami.
 
-> **Where you are now**: this is the `courier-deploy` branch — code for the
-> **real Unitree G1**. If you want to play with the simulator first
-> (recommended), `git checkout courier-sim` and read that branch's README.
+> **Tu jesteś**: branch `courier-deploy` — kod dla **realnego Unitree G1**.
+> Jeśli chcesz najpierw bawić się symulatorem (rekomendowane),
+> `git checkout courier-sim` i przeczytaj README tamtego brancha.
 
-## TL;DR — first time on the team?
+## TL;DR — pierwszy raz w zespole?
 
-1. **Pick your branch** (see [Branches](#branches) below):
-   - You have only a laptop → `courier-sim`
-   - You're at the lab with a real G1 → `courier-deploy` (this one)
-2. **Skim the architecture diagram** ([here](#architecture-diagram)) so you
-   know which layer owns what. You don't need to understand it deeply yet.
-3. **Build the workspace** ([5 minutes](#build-and-source)).
-4. **Run the full mission** ([Running the full mission](#running-the-full-mission)) —
-   one launch file brings everything up.
-5. **When something breaks**, look at:
-   - [Single-skill debugging](#single-skill-debugging) — fire one action, see what happens
-   - [Diagnostic viewers](#diagnostic-viewers) — visual feedback for camera / lidar / nav
-   - [docs/deployment_guide.md](docs/deployment_guide.md) — full troubleshooting
-6. **When you change code**, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-   first — it is the source of truth for design decisions and code style.
+1. **Wybierz branch** (patrz [Branche](#branche) niżej):
+   - Masz tylko laptopa → `courier-sim`
+   - Jesteś w labie z prawdziwym G1 → `courier-deploy` (ten)
+2. **Rzuć okiem na diagram architektury** ([tutaj](#diagram-architektury))
+   żeby wiedzieć która warstwa za co odpowiada. Na razie nie musisz
+   rozumieć wszystkiego dogłębnie.
+3. **Build workspace'u** ([5 minut](#build-i-source)).
+4. **Odpal pełną misję** ([Pełne uruchomienie misji](#pełne-uruchomienie-misji)) —
+   jeden launch podnosi całość.
+5. **Gdy coś się zepsuje**:
+   - [Pojedyncze skille — debug](#pojedyncze-skille--debug) — odpal jedną akcję, zobacz co się dzieje
+   - [Podgląd diagnostyczny](#podgląd-diagnostyczny) — wizualizacja kamery, lidaru, nav
+   - [docs/deployment_guide.md](docs/deployment_guide.md) — pełen troubleshooting
+6. **Zanim zmienisz kod**, przeczytaj
+   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — to jest źródło prawdy
+   dla decyzji projektowych i konwencji.
 
-## Branches
+## Branche
 
-The team repo (`gitlab.com/iAndy77/j2s`) has three orphan branches with
-independent histories. Pick the one matching your target — they all
-share the mission/skills/platform layers but differ in what's running
-underneath them.
+Repo zespołu (`gitlab.com/iAndy77/j2s`) ma trzy orphan branche o
+niezależnych historiach. Wybierz pasujący do twojego targetu — wszystkie
+dzielą warstwy mission/skills/platform, różnią się tym co działa pod
+spodem.
 
-| Branch | What it is | When to use |
+| Branch | Co to | Kiedy używać |
 |---|---|---|
-| **`courier-sim`** | Ubuntu native MuJoCo bridge + full mission stack | Daily development, no real robot needed |
-| **`courier-deploy`** | Real Unitree G1 + Livox Mid-360 + RealSense D435i wiring | Lab sessions with the actual robot |
-| `courier-sim-legacy-mac` | Frozen snapshot of the original mac MuJoCo + Linux Parallels setup | Historical reference only — not maintained |
+| **`courier-sim`** | Ubuntu native MuJoCo bridge + pełen stack misji | Codzienna praca, bez fizycznego robota |
+| **`courier-deploy`** | Realny Unitree G1 + Livox Mid-360 + RealSense D435i | Sesje labowe z prawdziwym robotem |
+| `courier-sim-legacy-mac` | Frozen snapshot oryginalnego setupu mac MuJoCo + Linux Parallels | Tylko historia — nie utrzymywany |
 
-Switching branches:
+Przełączanie branchy:
 ```bash
 cd ~/g1_courier_ws/src/courier
 git fetch
-git checkout courier-sim       # or courier-deploy
+git checkout courier-sim       # albo z powrotem na courier-deploy
 cd ../..
-rm -rf build install log        # clear stale artifacts from other branch
+rm -rf build install log        # wyczyść artefakty z poprzedniego brancha
 colcon build --symlink-install
 source install/setup.bash
 ```
 
-## Hardware prerequisites (this branch)
+## Wymagania sprzętowe (ten branch)
 
-For sim, see `courier-sim` README — none of this section applies.
+Dla sim — patrz README brancha `courier-sim`, ta sekcja nie ma
+zastosowania.
 
-- Unitree G1 (29-DoF) with `arm_sdk` enabled and sport API ready
-- Livox Mid-360 mounted on head, USB connected to onboard PC
-- RealSense D435i in chest plate, USB3
-- Two desks (table A, table B) with AprilTag `tag36h11`:
-  - Table A → id `5`, side length 0.16 m, on front edge
-  - Table B → id `7`, same family/size
-- Cardboard box with tag `id=10` on top face (size 0.10 m)
-- Saved 2D map at `~/maps/lab.yaml` (build with `mapping_real.launch.py` once per lab)
-- Calibrated waypoints in `src/g1_courier_mission/config/waypoints.yaml`
+- Unitree G1 (29-DoF) z włączonym `arm_sdk` i gotowym sport API
+- Livox Mid-360 zamontowany na głowie, USB do onboard PC
+- RealSense D435i w torsie, USB3
+- Dwa biurka (table A, table B) oznaczone AprilTagiem `tag36h11`:
+  - Table A → id `5`, długość boku 0.16 m, na przedniej krawędzi
+  - Table B → id `7`, ta sama family/size
+- Tekturowy karton z tagiem `id=10` na górnej ścianie (rozmiar 0.10 m)
+- Zapisana mapa 2D w `~/maps/lab.yaml` (zbudowana raz przez
+  `mapping_real.launch.py`)
+- Skalibrowane waypoints w `src/g1_courier_mission/config/waypoints.yaml`
 
-Full hardware checklist + calibration procedure:
+Pełen checklist sprzętowy + procedura kalibracji:
 [docs/deployment_guide.md](docs/deployment_guide.md).
 
-## Build and source
+## Build i source
 
 ```bash
 cd ~/g1_courier_ws
 colcon build --symlink-install
 source install/setup.bash
-# Add `source ~/g1_courier_ws/install/setup.bash` to your ~/.bashrc to skip
-# the source step in future shells.
+# Dodaj `source ~/g1_courier_ws/install/setup.bash` do ~/.bashrc, żeby
+# w nowych powłokach nie sourcować ręcznie.
 ```
 
-If the build fails, the most common causes are:
+Najczęstsze powody błędu buildu:
 
-- Missing apt deps → see [Required external dependencies](#required-external-dependencies)
-- Missing `unitree_hg` / `unitree_api` → clone `unitree_ros2` into `src/`
-  (see deployment guide § "Workspace + sources")
+- Brakujące pakiety apt → patrz
+  [Wymagane zależności zewnętrzne](#wymagane-zależności-zewnętrzne)
+- Brakujący `unitree_hg` / `unitree_api` → sklonuj `unitree_ros2` do
+  `src/` (deployment guide § "Workspace + sources")
 
-## Running the full mission
+## Pełne uruchomienie misji
 
-One command brings up the entire stack: nav2, AMCL, AprilTag detector,
-LiDAR-to-laserscan converter, dock / pick / place / retreat servers,
+Jeden launch podnosi cały stack: nav2, AMCL, detector AprilTag, konwerter
+LiDAR-do-laserscan, action serwery dock / pick / place / retreat,
 mission BT.
 
 ```bash
 ros2 launch g1_courier_bringup real.launch.py map:=$HOME/maps/lab.yaml
 ```
 
-What happens, step by step:
+Co się dzieje, krok po kroku:
 
-1. AMCL loads `lab.yaml`, waits for an initial pose (set it from RViz
-   "2D Pose Estimate" if it doesn't auto-converge).
-2. Mission BT navigates to predock for table A.
-3. Dock APRILTAG → tag5 (30 cm), then re-dock → box tag10 (17 cm).
-4. `pick_box` runs P0..P6 keyframes, grasp verifier confirms via τ jump.
-5. Carry mode engages — `cmd_vel_arbiter` lowers velocity caps.
-6. Navigate to predock for table B.
-7. Dock LIDAR_LINE (head_cam is occluded by the carried box).
-8. `place_box` runs P5..ZERO, release verifier confirms τ drop.
-9. Retreat 1.0 m, swap A↔B, repeat.
+1. AMCL ładuje `lab.yaml`, czeka na initial pose (jeśli nie zbiega
+   automatycznie, ustaw "2D Pose Estimate" z RViz).
+2. Mission BT nawiguje do predocka biurka A.
+3. Dock APRILTAG → tag5 (30 cm), potem re-dock → box tag10 (17 cm).
+4. `pick_box` wykonuje keyframes P0..P6, grasp verifier potwierdza
+   skok τ.
+5. Włącza się carry mode — `cmd_vel_arbiter` obniża limity prędkości.
+6. Nawigacja do predocka biurka B.
+7. Dock LIDAR_LINE (head_cam zasłonięta przez niesiony karton).
+8. `place_box` wykonuje P5..ZERO, release verifier potwierdza spadek τ.
+9. Retreat 1.0 m, swap A↔B, kolejny cykl.
 
-Stop the mission cleanly with `Ctrl+C` in the launch terminal.
+Czyste zatrzymanie: `Ctrl+C` w terminalu launch.
 
-> **Watching what happens**: open RViz alongside (`ros2 run rviz2 rviz2`)
-> with Map, AMCL Pose, Nav2 Plan, and TF displays. Plus the
-> [diagnostic viewers](#diagnostic-viewers) below.
+> **Co obserwować**: obok odpal RViz (`ros2 run rviz2 rviz2`) z displayami
+> Map, AMCL Pose, Nav2 Plan, TF. Plus
+> [podglądy diagnostyczne](#podgląd-diagnostyczny) niżej.
 
-### Limit cycles for testing
+### Limit cykli do testów
 
-By default the BT loops forever. To run N cycles only:
+Domyślnie BT pętli się w nieskończoność. Żeby uruchomić tylko N cykli:
 
 ```bash
 ros2 launch g1_courier_bringup real.launch.py \
@@ -120,30 +126,30 @@ ros2 launch g1_courier_bringup real.launch.py \
   max_cycles:=3
 ```
 
-(`max_cycles` is a parameter on `mission_node`; set to 0 = infinite.)
+(`max_cycles` to parameter `mission_node`; 0 = nieskończoność.)
 
-## Single-skill debugging
+## Pojedyncze skille — debug
 
-When you want to test one action server in isolation. Useful for:
+Gdy chcesz przetestować jeden action server w izolacji. Przydatne do:
 
-- Verifying a calibration change without the full mission cycle
-- Reproducing a bug that only shows in one phase
-- Onboarding — feel out the contracts one at a time
+- Sprawdzenia zmiany kalibracji bez pełnego cyklu misji
+- Reprodukcji buga który pojawia się tylko w jednej fazie
+- Onboardingu — wyczucia kontraktów action po kolei
 
-All examples below assume `real.launch.py` is running in another terminal,
-or at least the relevant action server has been started.
+Wszystkie przykłady niżej zakładają że `real.launch.py` chodzi w innym
+terminalu, albo przynajmniej działa odpowiedni action server.
 
 ### Pick
 
 ```bash
-# Use nominal P0..P6 keyframes (no offset from a measured box pose).
+# Nominalne keyframes P0..P6 (bez offsetu z mierzonej pozycji boxa).
 ros2 action send_goal /pick_box g1_courier_msgs/action/PickBox \
   '{box_pose: {header: {frame_id: ""}}, sequence_name: "pick_box", timeout_s: 30.0}' \
   --feedback
 ```
 
-You'll see phase progression `wait_for_state → approach → grasp → lift → verify`.
-Result includes `grasp_verified: true|false`.
+Zobaczysz progresję faz `wait_for_state → approach → grasp → lift → verify`.
+Result zawiera `grasp_verified: true|false`.
 
 ### Place
 
@@ -153,7 +159,7 @@ ros2 action send_goal /place_box g1_courier_msgs/action/PlaceBox \
   --feedback
 ```
 
-### Dock to a table (AprilTag mode)
+### Dock do biurka (tryb AprilTag)
 
 ```bash
 ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
@@ -163,10 +169,10 @@ ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
   --feedback
 ```
 
-`mode: 0` is `MODE_APRILTAG`, `1` is `MODE_LIDAR_LINE`, `2` is `MODE_AMCL_ONLY`
-(see `src/g1_courier_msgs/action/DockToTable.action`).
+`mode: 0` to `MODE_APRILTAG`, `1` to `MODE_LIDAR_LINE`, `2` to `MODE_AMCL_ONLY`
+(patrz `src/g1_courier_msgs/action/DockToTable.action`).
 
-### Dock to a table (LiDAR line mode — for when carrying a box)
+### Dock do biurka (tryb LiDAR line — gdy niesiesz karton)
 
 ```bash
 ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
@@ -177,7 +183,7 @@ ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
   --feedback
 ```
 
-### Navigate to a 2D pose
+### Nawigacja do pozy 2D
 
 ```bash
 ros2 action send_goal /courier/navigate_to_pose \
@@ -190,9 +196,9 @@ ros2 action send_goal /courier/navigate_to_pose \
   --feedback
 ```
 
-(`xy_tolerance_m: 0.0` means "use nav2 default from `nav2_params.yaml`".)
+(`xy_tolerance_m: 0.0` znaczy "użyj domyślnej z `nav2_params.yaml`".)
 
-### Retreat (open-loop reverse)
+### Retreat (open-loop wycofanie)
 
 ```bash
 ros2 action send_goal /retreat g1_courier_msgs/action/Retreat \
@@ -200,134 +206,134 @@ ros2 action send_goal /retreat g1_courier_msgs/action/Retreat \
   --feedback
 ```
 
-### Toggle carry mode (services on cmd_vel_arbiter)
+### Carry mode (services na cmd_vel_arbiter)
 
 ```bash
-# Engage carry-mode velocity caps:
+# Włącz limity carry-mode:
 ros2 service call /safety/set_carry_mode g1_courier_msgs/srv/SetCarryMode \
   '{carrying: true}'
 
-# Freeze locomotion (publishes zero velocity regardless of upstream):
+# Freeze locomotion (publikuj zerowe cmd_vel niezależnie od upstreamu):
 ros2 service call /safety/set_freeze g1_courier_msgs/srv/SetFreeze \
   '{freeze: true}'
 ```
 
-### Inspect mission BT state
+### Stan mission BT
 
 ```bash
-# Latched mission status (cycle counter, current phase):
+# Latched mission status (licznik cykli, aktualna faza):
 ros2 topic echo /mission_status --once
 
-# Live BT tick logs (the BT prints stage transitions):
+# Live BT tick logs (BT loguje przejścia między fazami):
 ros2 node info /mission_node
 ```
 
-## Diagnostic viewers
+## Podgląd diagnostyczny
 
-Run alongside `real.launch.py` (each in its own terminal):
+Odpalaj obok `real.launch.py` (każdy w swoim terminalu):
 
 ```bash
 python3 tools/cam_viewer.py
-# Opens window with /head_cam image + AprilTag bounding boxes + PnP distance.
-# Useful for: checking exposure, focus, tag detection range.
+# Okno z /head_cam image + bbox AprilTagów + dystans z PnP.
+# Przydatne do: sprawdzania ekspozycji, ostrości, zasięgu detection.
 
 python3 tools/lidar_viewer.py
-# Top-down 2D scan + RANSAC line fit (matches dock LIDAR_LINE algorithm).
-# Useful for: checking pcl-to-laserscan slice height, dock alignment.
+# Top-down 2D scan + RANSAC line fit (algorytm jak dock LIDAR_LINE).
+# Przydatne do: sprawdzania wysokości slice'a pcl-to-laserscan, alignmentu docka.
 
 python3 tools/plan_viz.py
-# Saves /tmp/nav_plan.png on every nav2 plan update.
-# View with: feh --reload 1 /tmp/nav_plan.png
-# Useful for: checking AMCL convergence + nav2 path quality.
+# Zapisuje /tmp/nav_plan.png przy każdym update'cie planu nav2.
+# Podgląd: feh --reload 1 /tmp/nav_plan.png
+# Przydatne do: konwergencji AMCL i jakości ścieżki nav2 vs costmap.
 ```
 
-See `tools/README.md` for keyboard shortcuts (`q`/`s`).
+Skróty klawiszowe (`q`/`s`) opisane w `tools/README.md`.
 
-## Building a map (once per lab)
+## Budowanie mapy (raz na lab)
 
 ```bash
 ros2 launch g1_courier_bringup mapping_real.launch.py
-# In another terminal:
+# W innym terminalu:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
-# Drive the robot through the lab, covering both tables and the transit area.
-# When the map looks complete in RViz:
+# Przejedź robotem przez cały lab pokrywając oba biurka i obszar tranzytowy.
+# Gdy mapa wygląda kompletnie:
 ros2 run nav2_map_server map_saver_cli -f ~/maps/lab
 ```
 
-Then update `src/g1_courier_mission/config/waypoints.yaml` from the new
-map — see deployment guide § "Calibrate waypoints from map" for the
-RViz-based procedure.
+Następnie zaktualizuj `src/g1_courier_mission/config/waypoints.yaml`
+zgodnie z nową mapą — patrz deployment guide § "Calibrate waypoints
+from map" (procedura w RViz).
 
-## Architecture diagram
+## Diagram architektury
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Mission layer       g1_courier_mission                     │
 │  - py_trees_ros Behavior Tree                               │
 │  - blackboard: cycle_count, current_target, box_held        │
-│  - calls skills as ROS2 actions, retries on failure         │
+│  - woła skille jako akcje ROS2, retry on failure            │
 └──────────────┬──────────────────────────────────────────────┘
-               │ ROS2 actions (g1_courier_msgs)
+               │ akcje ROS2 (g1_courier_msgs)
 ┌──────────────┴──────────────────────────────────────────────┐
 │  Skills layer                                               │
 │  ┌─────────────────────┐ ┌────────────────────────────────┐ │
 │  │ NavigateToPose      │ │ DockToTable                    │ │
-│  │ wraps nav2          │ │ MODE_APRILTAG / LIDAR / AMCL   │ │
+│  │ wrapper nav2        │ │ MODE_APRILTAG / LIDAR / AMCL   │ │
 │  └─────────────────────┘ └────────────────────────────────┘ │
 │  ┌─────────────────────┐ ┌────────────────────────────────┐ │
-│  │ PickBox / PlaceBox  │ │ Retreat (open-loop reverse)    │ │
+│  │ PickBox / PlaceBox  │ │ Retreat (open-loop wycofanie)  │ │
 │  └─────────────────────┘ └────────────────────────────────┘ │
 └──────────────┬──────────────────────────────────────────────┘
                │ /cmd_vel_*, /arm_sdk, /lowstate, TF, /scan
 ┌──────────────┴──────────────────────────────────────────────┐
 │  Platform layer                                             │
 │  ┌─────────────────────┐ ┌────────────────────────────────┐ │
-│  │ Nav2 stack          │ │ Localization                   │ │
-│  │ planner / controller│ │ slam_toolbox (mapping)         │ │
-│  └─────────────────────┘ │ nav2_amcl (running)            │ │
+│  │ Nav2 stack          │ │ Lokalizacja                    │ │
+│  │ planner / controller│ │ slam_toolbox (mapowanie)       │ │
+│  └─────────────────────┘ │ nav2_amcl (działanie)          │ │
 │  ┌─────────────────────┐ └────────────────────────────────┘ │
 │  │ cmd_vel_arbiter     │ ┌────────────────────────────────┐ │
-│  │ - priority routing  │ │ Sensors                        │ │
-│  │ - carry-mode limits │ │ Mid360 LiDAR + RealSense D435i │ │
+│  │ - priorytety        │ │ Sensory                        │ │
+│  │ - limity carry-mode │ │ Mid360 LiDAR + RealSense D435i │ │
 │  │ - freeze + e-stop   │ │ apriltag_ros                   │ │
 │  └─────────────────────┘ │ pointcloud_to_laserscan        │ │
 │                          └────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ↓ /lowstate, /livox/lidar, /camera/...
-                       Unitree firmware bridges +
-                       Livox + RealSense drivers
+                       Firmware bridges Unitree +
+                       sterowniki Livox + RealSense
 ```
 
-The vertical rule: each layer talks **down** through ROS2 actions /
-topics defined in `g1_courier_msgs`. The skill layer never calls another
-skill — the mission BT composes them.
+Reguła wertykalna: każda warstwa rozmawia **w dół** przez akcje /
+topiki ROS2 zdefiniowane w `g1_courier_msgs`. Skill nigdy nie woła
+innego skilla — kompozycja jest w mission BT.
 
-## Packages
+## Pakiety
 
-| Package | Type | Role |
+| Pakiet | Typ | Rola |
 |---|---|---|
-| `g1_courier_msgs` | ament_cmake | Action / srv / msg interfaces — the API of the system |
-| `g1_courier_arm_skills` | ament_python | `PickBox` and `PlaceBox` action servers, parametric arm controller |
-| `g1_courier_docking` | ament_python | `DockToTable` action server with AprilTag / LiDAR / AMCL modes |
-| `g1_courier_mission` | ament_python | Behavior Tree mission node, `NavigateToPose` proxy, `Retreat` |
-| `g1_courier_safety` | ament_python | `cmd_vel` arbiter with priority, carry mode, freeze and e-stop |
-| `g1_courier_bringup` | ament_python | Launch files and configs (nav2, slam_toolbox, AMCL, AprilTag, ...) |
+| `g1_courier_msgs` | ament_cmake | Definicje action / srv / msg — API systemu |
+| `g1_courier_arm_skills` | ament_python | Action serwery `PickBox` i `PlaceBox`, parametryczny arm controller |
+| `g1_courier_docking` | ament_python | Action server `DockToTable` z trybami AprilTag / LiDAR / AMCL |
+| `g1_courier_mission` | ament_python | Mission node (Behavior Tree), `NavigateToPose` proxy, `Retreat` |
+| `g1_courier_safety` | ament_python | `cmd_vel` arbiter z priorytetami, carry mode, freeze, e-stop |
+| `g1_courier_bringup` | ament_python | Launch i configi (nav2, slam_toolbox, AMCL, AprilTag, ...) |
 
-## Mission flow (the BT executes this)
+## Przepływ misji (BT wykonuje to)
 
 ```
 loop forever:
   set_carry_mode(off)
   navigate_to_pose(predock_table_A)        # nav2 + AMCL
   dock_to_table(mode=APRILTAG, tag=A)      # 6-DoF visual servo
-  pick_box(box_pose_from_tag)              # parametric arm trajectory
-  verify_grasp                             # τ threshold
-  set_carry_mode(on)                       # lower vx/vyaw, smaller steps
+  pick_box(box_pose_from_tag)              # parametryczna trajektoria ramion
+  verify_grasp                             # próg τ
+  set_carry_mode(on)                       # niższe vx/vyaw, mniejsze kroki
 
   navigate_to_pose(predock_table_B)        # nav2 + AMCL only
-  dock_to_table(mode=LIDAR_LINE, tag=B)    # camera occluded by box
-  place_box(target_pose_from_lidar)        # parametric place
+  dock_to_table(mode=LIDAR_LINE, tag=B)    # kamera zasłonięta przez karton
+  place_box(target_pose_from_lidar)        # parametryczne odłożenie
   verify_release
 
   set_carry_mode(off)
@@ -335,74 +341,73 @@ loop forever:
   swap A <-> B
 ```
 
-The BT has retry policies on dock and pick. A failed `verify_grasp`
-re-runs dock + pick. A failed `verify_release` escalates to abort.
+BT ma retry policy na dock i pick. Nieudany `verify_grasp` powtarza
+dock + pick. Nieudany `verify_release` eskaluje do abort.
 
-## How the camera-occlusion problem is solved
+## Jak rozwiązaliśmy zasłanianie kamery
 
-When the robot carries the box, the front camera view is mostly blocked,
-so AprilTag detection becomes unreliable. The stack handles this by
-**never relying on AprilTag for global localization**. Globally we
-always run AMCL on a 2D laser scan derived from the LiDAR. AprilTag is
-used only to refine the final approach to the pick desk (because the
-pick must hit ±2-3 cm tolerance). For the place desk we approach with
-two cheaper means combined:
+Gdy robot niesie karton, kamera frontowa jest w większości zasłonięta —
+detection AprilTaga staje się zawodny. Stack rozwiązuje to przez
+**niekorzystanie z AprilTag do globalnej lokalizacji**. Globalnie
+zawsze AMCL na 2D laser scan z LiDARu. AprilTag używamy tylko do
+finalnego doprecyzowania zbliżenia do biurka pickup (bo pick wymaga
+tolerancji ±2-3 cm). Do biurka place podchodzimy dwoma tańszymi
+środkami łącznie:
 
-1. AMCL pose, which is already accurate to roughly ±5 cm in a
-   well-mapped environment.
-2. LiDAR line fitting against the table edge (`MODE_LIDAR_LINE`), which
-   corrects the residual lateral and yaw error directly from the scan,
-   regardless of camera state.
+1. AMCL pose, dokładny do ~±5 cm w dobrze zmapowanym środowisku.
+2. LiDAR line fitting na krawędzi biurka (`MODE_LIDAR_LINE`), korygujący
+   resztkowy lateral i yaw error bezpośrednio z scan, niezależnie od
+   stanu kamery.
 
-The dock action takes a `mode` argument so the mission BT chooses
-per-table what level of refinement is required.
+Action dock przyjmuje argument `mode`, więc mission BT wybiera per-table
+jaki poziom doprecyzowania jest potrzebny.
 
-## Coordination between locomotion and arms
+## Koordynacja loco↔arms
 
-- `cmd_vel_arbiter` exposes a `freeze` service. Before any arm action
-  the mission node sets freeze to true, the arbiter publishes zero
-  velocities, and the arm action waits until lowstate reports body
-  velocity below a threshold before issuing the first arm setpoint.
-- `cmd_vel_arbiter` exposes a `carry_mode` service. With box held it
-  caps `max_vx`, `max_vy`, and `max_vyaw` at a reduced level (config)
-  and switches the duration field accordingly.
-- After `place_box` the arms are brought to zero with weight ramped to
-  0, returning control to the FSM.
+- `cmd_vel_arbiter` udostępnia service `freeze`. Przed każdą akcją ramion
+  mission node ustawia freeze=true, arbiter publikuje zerowe prędkości,
+  arm action czeka aż lowstate zaraportuje prędkość ciała poniżej progu
+  zanim wyśle pierwszy setpoint do ramion.
+- `cmd_vel_arbiter` udostępnia service `carry_mode`. Z trzymanym
+  kartonem ogranicza `max_vx`, `max_vy`, `max_vyaw` do niższych
+  wartości (config).
+- Po `place_box` ramiona są sprowadzane do zera z weight ramped 0,
+  zwracając kontrolę FSM-owi.
 
-## Configs you'll likely need to tune
+## Configi które prawdopodobnie zechcesz tunować
 
-| File | What to tune | When |
+| Plik | Co tunować | Kiedy |
 |---|---|---|
-| `mission/config/waypoints.yaml` | `predock_x/y/yaw` per table | Every new map |
-| `arm_skills/config/arm_skills.yaml` | `grasp_tau_threshold_nm` | Per box weight |
-| `docking/config/docking.yaml` | `kp_xy`, `kp_yaw`, `target_distance` | First deploy + per-lighting |
-| `safety/config/safety.yaml` | `max_v*_carry` | Per box weight + balance |
-| `bringup/config/nav2_params.yaml` | costmap inflation, footprint | Per lab clutter |
+| `mission/config/waypoints.yaml` | `predock_x/y/yaw` per-biurko | Każda nowa mapa |
+| `arm_skills/config/arm_skills.yaml` | `grasp_tau_threshold_nm` | Per masa kartonu |
+| `docking/config/docking.yaml` | `kp_xy`, `kp_yaw`, `target_distance` | Pierwszy deploy + per oświetlenie |
+| `safety/config/safety.yaml` | `max_v*_carry` | Per masa kartonu + balans |
+| `bringup/config/nav2_params.yaml` | inflation costmapy, footprint | Per zatłoczenie laba |
 
-Why-and-how for each is in the [deployment guide](docs/deployment_guide.md)
-§ "Configs that you may need to tune".
+Why-and-how dla każdego jest w
+[deployment guide](docs/deployment_guide.md) § "Configs that you may
+need to tune".
 
-## What is implemented
+## Co jest zaimplementowane
 
-- All action / service / message interfaces (`g1_courier_msgs`).
-- Parametric arm controller with CRC, keyframe library (`P0..P6` from
-  real G1 calibration), weight ramping, grasp verifier hook,
-  kinematic-mode sentinel (`mode==99`) for sim-side joint forcing.
-- `PickBox` and `PlaceBox` action servers with grasp verifier
-  integration.
-- `DockToTable` action server with all three modes:
-  - `MODE_APRILTAG` — 6-DoF PnP visual servo (table tag5/7 or box tag10)
-  - `MODE_LIDAR_LINE` — RANSAC line fit on 2D scan, perpendicular alignment
-    (used when carried box occludes head_cam)
-  - `MODE_AMCL_ONLY` — trust AMCL (fallback)
-- `cmd_vel_arbiter` with priority routing (dock → retreat → nav →
-  /cmd_vel), carry-mode velocity caps, freeze service, e-stop latch.
-- Behavior Tree mission cycle: `pickup_at_a → transfer_b → pickup_b →
-  transfer_a` with `[STAGE START]`/`[STAGE END]` timing logs.
+- Wszystkie interfejsy action / service / msg (`g1_courier_msgs`).
+- Parametryczny arm controller z CRC, biblioteką keyframes (`P0..P6`
+  z kalibracji realnego G1), weight ramping, hookiem grasp verifier,
+  sentinelem kinematic-mode (`mode==99`) dla sim.
+- Action serwery `PickBox` i `PlaceBox` z grasp verifierem.
+- Action server `DockToTable` ze wszystkimi trzema trybami:
+  - `MODE_APRILTAG` — 6-DoF PnP visual servo (tag biurka 5/7 lub box tag10)
+  - `MODE_LIDAR_LINE` — RANSAC line fit na 2D scan, perpendicular alignment
+    (gdy niesiony karton zasłania head_cam)
+  - `MODE_AMCL_ONLY` — zaufanie AMCL (fallback)
+- `cmd_vel_arbiter` z priorytetami (dock → retreat → nav → /cmd_vel),
+  limitami carry-mode, freeze service, e-stop latch.
+- Mission BT z cyklem: `pickup_at_a → transfer_b → pickup_b →
+  transfer_a` z logami `[STAGE START]`/`[STAGE END]`.
 - nav2 stack: AMCL OmniMotionModel + NavfnPlanner A\* + RotationShim →
-  RegulatedPurePursuit + costmaps with obstacle/inflation layers.
+  RegulatedPurePursuit + costmaps z warstwami obstacle/inflation.
 
-## Required external dependencies
+## Wymagane zależności zewnętrzne
 
 apt (ROS2 Jazzy):
 ```
@@ -418,23 +423,23 @@ ros-jazzy-realsense2-camera
 ros-jazzy-teleop-twist-keyboard
 ```
 
-ROS2 source (clone into `src/`):
+ROS2 source (clone do `src/`):
 ```
-unitree_ros2          unitree_hg / unitree_api / unitree_go IDLs
+unitree_ros2          IDLs unitree_hg / unitree_api / unitree_go
                       https://github.com/unitreerobotics/unitree_ros2
-unitree_ros           g1_description URDF + meshes (master branch)
+unitree_ros           URDF g1_description + meshes (master branch)
                       https://github.com/unitreerobotics/unitree_ros
-livox_ros_driver2     Livox Mid-360 driver
+livox_ros_driver2     Sterownik Livox Mid-360
                       https://github.com/Livox-SDK/livox_ros_driver2
 ```
 
-## Documentation index
+## Indeks dokumentacji
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — design rules, layer
-  boundaries, anti-patterns. **Read before changing core code.**
-- [docs/deployment_guide.md](docs/deployment_guide.md) — full hardware
-  setup, calibration procedure, troubleshooting.
-- [tools/README.md](tools/README.md) — diagnostic viewer details.
-- [docs/phases/](docs/phases/) — historical chronicle of the
-  development phases (sim-focused; helpful for understanding *why* the
-  current design exists).
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — reguły projektowe,
+  granice warstw, anti-patterns. **Czytaj zanim zmienisz core kod.**
+- [docs/deployment_guide.md](docs/deployment_guide.md) — pełen setup
+  sprzętowy, procedura kalibracji, troubleshooting.
+- [tools/README.md](tools/README.md) — szczegóły podglądów diagnostycznych.
+- [docs/phases/](docs/phases/) — historyczna kronika faz developmentu
+  (skupiona na sim; przydatna do zrozumienia *dlaczego* obecny design
+  wygląda jak wygląda).

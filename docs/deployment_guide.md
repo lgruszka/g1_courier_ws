@@ -1,40 +1,41 @@
-# Real-robot deployment guide (`courier-deploy` branch)
+# Deployment guide — realny robot (`courier-deploy` branch)
 
-End-to-end procedure for bringing the courier mission up on a physical
-Unitree G1 with Livox Mid-360 and RealSense D435i.
+End-to-end procedura podniesienia misji courier na fizycznym Unitree G1
+z Livox Mid-360 i RealSense D435i.
 
-> Sim users: this guide does not apply. Switch to `courier-sim` branch.
+> Użytkownicy sim: ten guide nie ma zastosowania. Przełącz się na branch
+> `courier-sim`.
 
-## Reading order for first-time use
+## Kolejność czytania (pierwszy raz)
 
-If you've never deployed this stack on a real robot before, follow the
-sections in this order — each builds on the previous:
+Jeśli jeszcze nie deployowałeś tego stacka na realnym robocie, idź
+sekcjami w tej kolejności — każda buduje na poprzedniej:
 
-1. [Hardware checklist](#hardware-checklist) — verify every box ticks
-2. [Software install (one-time)](#software-install-one-time) — packages, repo, drivers
-3. [Day 1 walkthrough](#day-1-walkthrough) — your first 60 minutes with the robot
-4. [Build a map](#build-a-map-once-per-lab-layout) — slam_toolbox + Livox slice
-5. [Calibrate waypoints from map](#calibrate-waypoints-from-map) — RViz pick-points
-6. [First mission run](#first-mission-run) — full A↔B cycle
-7. [Troubleshooting](#troubleshooting) — when things break
+1. [Hardware checklist](#hardware-checklist) — zweryfikuj każdy ptaszek
+2. [Instalacja oprogramowania (jednorazowo)](#instalacja-oprogramowania-jednorazowo) — pakiety, repo, sterowniki
+3. [Day 1 walkthrough](#day-1-walkthrough) — pierwsze 60 minut z robotem
+4. [Budowa mapy (raz na lab)](#budowa-mapy-raz-na-lab) — slam_toolbox + slice Livox
+5. [Kalibracja waypointów z mapy](#kalibracja-waypointów-z-mapy) — clicks w RViz
+6. [Pierwsze uruchomienie misji](#pierwsze-uruchomienie-misji) — pełen cykl A↔B
+7. [Troubleshooting](#troubleshooting) — gdy coś nie działa
 
-If you've already done install + map + calibration on a previous visit,
-skip straight to [First mission run](#first-mission-run).
+Jeśli robiłeś już install + map + kalibrację na poprzedniej wizycie,
+przejdź od razu do [Pierwsze uruchomienie misji](#pierwsze-uruchomienie-misji).
 
 ## Hardware checklist
 
-- [ ] Unitree G1 (29-DoF) with `arm_sdk` enabled and sport API ready
-- [ ] Livox Mid-360 mounted on head, USB connected to onboard PC
-- [ ] RealSense D435i mounted in chest plate, USB3
-- [ ] Two desks (table A, table B) marked with AprilTag `tag36h11`:
-  - Table A → id `5`, side length 0.16 m, mounted on table front edge
-  - Table B → id `7`, same family/size
-- [ ] Cardboard box with tag `id=10` on top face (size 0.10 m)
-- [ ] WiFi or ethernet between onboard PC and dev laptop (for RViz / debug)
+- [ ] Unitree G1 (29-DoF) z włączonym `arm_sdk` i gotowym sport API
+- [ ] Livox Mid-360 zamontowany na głowie, USB do onboard PC
+- [ ] RealSense D435i w torsie, USB3
+- [ ] Dwa biurka (table A, table B) oznaczone AprilTagiem `tag36h11`:
+  - Table A → id `5`, długość boku 0.16 m, na przedniej krawędzi
+  - Table B → id `7`, ta sama family/size
+- [ ] Tekturowy karton z tagiem `id=10` na górnej ścianie (rozmiar 0.10 m)
+- [ ] WiFi lub ethernet między onboard PC a dev laptopem (do RViz / debug)
 
-## Software install (one-time)
+## Instalacja oprogramowania (jednorazowo)
 
-### 1. ROS2 Jazzy + system packages
+### 1. ROS2 Jazzy + pakiety systemowe
 
 ```bash
 sudo apt install -y \
@@ -50,22 +51,22 @@ sudo apt install -y \
   ros-jazzy-teleop-twist-keyboard
 ```
 
-### 2. Workspace + sources
+### 2. Workspace + źródła
 
 ```bash
 mkdir -p ~/g1_courier_ws/src && cd ~/g1_courier_ws/src
 git clone https://gitlab.com/iAndy77/j2s.git -b courier-deploy courier
 ln -s courier/src/* .
 
-# Unitree IDLs
+# IDLs Unitree
 git clone https://github.com/unitreerobotics/unitree_ros2
 touch unitree_ros2/example/COLCON_IGNORE
 
-# G1 URDF + meshes (master branch — NOT unitree_ros2)
+# URDF G1 + meshes (master branch — NIE unitree_ros2)
 git clone https://github.com/unitreerobotics/unitree_ros
-# Use unitree_ros/robots/g1_description for robot_state_publisher.
+# Użyj unitree_ros/robots/g1_description dla robot_state_publisher.
 
-# Livox driver
+# Sterownik Livox
 git clone https://github.com/Livox-SDK/livox_ros_driver2
 ```
 
@@ -77,136 +78,138 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-### 4. Firmware-side bridges
+### 4. Bridge'e firmware'owe
 
-The Unitree G1 firmware exposes these DDS topics via the onboard SDK:
+Firmware Unitree G1 udostępnia te topiki DDS przez onboard SDK:
 
-- `/lowstate` — joint positions, IMU, foot contacts (publish)
-- `/lowcmd` — joint targets w/ CRC (subscribe; consumed by `arm_sdk`)
-- `/cmd_vel` — locomotion command (subscribe; consumed by sport API)
+- `/lowstate` — pozycje stawów, IMU, foot contacts (publish)
+- `/lowcmd` — targety stawów z CRC (subscribe; konsumowane przez `arm_sdk`)
+- `/cmd_vel` — komenda locomotion (subscribe; konsumowana przez sport API)
 
-Make sure the firmware-side bridge is running before launching this stack.
-Check with:
+Upewnij się że firmware-side bridge chodzi przed odpaleniem tego stacka.
+Sprawdzenie:
 
 ```bash
-ros2 topic hz /lowstate           # expect ~500 Hz
+ros2 topic hz /lowstate           # spodziewane ~500 Hz
 ros2 topic list | grep livox      # /livox/lidar
 ros2 topic list | grep camera     # /camera/color/image_raw
 ```
 
 ## Day 1 walkthrough
 
-Concrete sequence for your first session at the lab. Assumes the
-[hardware](#hardware-checklist) plus [software install](#software-install-one-time)
-are done.
+Konkretna sekwencja na pierwszą sesję w labie. Zakłada że
+[hardware](#hardware-checklist) i [install](#instalacja-oprogramowania-jednorazowo)
+są zrobione.
 
-### Minute 0–10: bring up the platform
+### Minuta 0–10: podniesienie platformy
 
-1. Power on the G1 and let it stand. Verify it's in damping mode (zero
-   torque, joints free).
-2. Plug Livox + RealSense USB to onboard PC.
-3. Start the firmware bridge (proprietary, sport API). Confirm:
+1. Włącz G1, niech wstanie. Zweryfikuj że jest w trybie damping (zerowy
+   moment, stawy luźne).
+2. Wepnij USB Livox + RealSense do onboard PC.
+3. Odpal firmware bridge (proprietary, sport API). Potwierdź:
    ```bash
    ros2 topic hz /lowstate          # ~500 Hz
    ros2 topic list | grep -E 'livox|camera'
    # /livox/lidar  /camera/color/image_raw  /camera/color/camera_info
    ```
-4. From your dev laptop on the same network:
+4. Z dev laptopa w tej samej sieci:
    ```bash
-   export ROS_DOMAIN_ID=<same as robot>
-   ros2 topic list   # should see all of the above
+   export ROS_DOMAIN_ID=<ten sam co robot>
+   ros2 topic list   # powinieneś widzieć wszystkie powyższe
    ```
 
-### Minute 10–25: smoke-test individual components
+### Minuta 10–25: smoke-test komponentów
 
-Don't run the mission yet — verify each piece works in isolation. Open
-4 terminals on your dev laptop. In each one source the workspace:
+Nie odpalaj jeszcze misji — zweryfikuj każdy element osobno. Otwórz 4
+terminale na dev laptopie. W każdym sourcuj workspace:
 ```bash
 source ~/g1_courier_ws/install/setup.bash
 ```
 
-**Terminal 1** — sensors visualised:
+**Terminal 1** — sensory wizualizowane:
 ```bash
 python3 ~/g1_courier_ws/tools/cam_viewer.py
-# Check: image arrives, exposure OK, you can see the lab in front of the robot.
+# Sprawdź: obraz przychodzi, ekspozycja OK, widać lab przed robotem.
 ```
 
-**Terminal 2** — LiDAR slice:
+**Terminal 2** — slice LiDAR:
 ```bash
 ros2 launch g1_courier_bringup mapping_real.launch.py
-# In another terminal:
+# W innym terminalu:
 python3 ~/g1_courier_ws/tools/lidar_viewer.py
-# Check: 360° scan visible, walls/desks readable, no obvious gaps.
+# Sprawdź: scan 360° widoczny, ściany/biurka czytelne, brak luk.
 ```
 
-If the lidar slice is empty or sparse, your `min_height/max_height`
-in `bringup/config/pointcloud_to_laserscan.yaml` doesn't match the
-Livox mount height. The defaults assume Livox at ~1.45 m AGL on the
-G1 head.
+Jeśli slice lidaru jest pusty albo rzadki, twoje `min_height/max_height`
+w `bringup/config/pointcloud_to_laserscan.yaml` nie pasuje do wysokości
+montażu Livoxa. Domyślne wartości zakładają Livox na ~1.45 m AGL na
+głowie G1.
 
-**Terminal 3** — manual drive test:
+**Terminal 3** — test ręcznej jazdy:
 ```bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
-Use sparingly — push w/x at small speeds (`0.1 m/s`). Confirm the
-robot translates as commanded. **Stop teleop before continuing.**
+Używaj rozważnie — naciskaj w/x z małymi prędkościami (`0.1 m/s`).
+Potwierdź że robot przemieszcza się zgodnie z komendą. **Wyłącz
+teleop zanim przejdziesz dalej.**
 
-**Terminal 4** — kill `mapping_real.launch.py` from terminal 2 with
-`Ctrl+C` once everything above looks good.
+**Terminal 4** — gdy wszystko wygląda OK, zabij `mapping_real.launch.py`
+z terminala 2 przez `Ctrl+C`.
 
-### Minute 25–45: build the map
+### Minuta 25–45: budowa mapy
 
 ```bash
 ros2 launch g1_courier_bringup mapping_real.launch.py
-# In a separate terminal:
+# W osobnym terminalu:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ros2 run rviz2 rviz2
-# Add → Map → topic /map. Watch the map fill in as you drive.
+# Add → Map → topic /map. Obserwuj jak mapa się wypełnia w trakcie jazdy.
 ```
 
-Drive the robot through the full lab layout: pass each table front,
-each transit corridor, both directions. Slow steady speed (~0.2 m/s)
-gives the cleanest map.
+Przejedź robotem przez całą topologię laba: front każdego biurka,
+każdy korytarz, oba kierunki. Wolna stała prędkość (~0.2 m/s) daje
+najczystszą mapę.
 
-When the map looks complete:
+Gdy mapa wygląda kompletnie:
 ```bash
 ros2 run nav2_map_server map_saver_cli -f ~/maps/lab
 ```
 
-You now have `~/maps/lab.pgm` + `~/maps/lab.yaml`.
+Masz teraz `~/maps/lab.pgm` + `~/maps/lab.yaml`.
 
-### Minute 45–60: calibrate waypoints
+### Minuta 45–60: kalibracja waypointów
 
-See [Calibrate waypoints from map](#calibrate-waypoints-from-map)
-below — clicks through RViz, edit `waypoints.yaml`, takes ~10 minutes.
+Patrz [Kalibracja waypointów z mapy](#kalibracja-waypointów-z-mapy)
+poniżej — clicks w RViz, edycja `waypoints.yaml`, ~10 minut.
 
-After this, you're ready for [First mission run](#first-mission-run).
+Po tym jesteś gotów na
+[Pierwsze uruchomienie misji](#pierwsze-uruchomienie-misji).
 
-## Build a map (once per lab layout)
+## Budowa mapy (raz na lab)
 
 ```bash
 ros2 launch g1_courier_bringup mapping_real.launch.py
-# In a second terminal:
+# W osobnym terminalu:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
-# Walk the robot through the lab covering both tables and the transit area.
-# When the map looks complete in RViz:
+# Przejedź robotem przez cały lab pokrywając oba biurka i obszar tranzytowy.
+# Gdy mapa wygląda kompletnie w RViz:
 ros2 run nav2_map_server map_saver_cli -f ~/maps/lab
 ```
 
-You now have `~/maps/lab.pgm` + `~/maps/lab.yaml`.
+Masz teraz `~/maps/lab.pgm` + `~/maps/lab.yaml`.
 
-## Calibrate waypoints from map
+## Kalibracja waypointów z mapy
 
-`src/g1_courier_mission/config/waypoints.yaml` defines per-table predock
-poses in **world (map) frame**. After saving a fresh map you must update
-the X/Y/yaw of each predock so that:
+`src/g1_courier_mission/config/waypoints.yaml` definiuje predock pose
+per-biurko w **world (map) frame**. Po zapisaniu nowej mapy musisz
+zaktualizować X/Y/yaw każdego predocka tak, żeby:
 
-- nav2 lands the robot ~30 cm in front of the table edge
-- tag5/tag7 is centred in `head_cam` field of view from there
+- nav2 sprowadzał robota ~30 cm przed krawędzią biurka
+- tag5/tag7 był wycentrowany w polu widzenia `head_cam` z tej pozycji
 
-### Procedure
+### Procedura
 
-1. **Open the map in RViz**:
+1. **Otwórz mapę w RViz**:
    ```bash
    ros2 run nav2_map_server map_server --ros-args \
      -p yaml_filename:=$HOME/maps/lab.yaml
@@ -214,24 +217,24 @@ the X/Y/yaw of each predock so that:
    # Add → Map → topic /map
    ```
 
-2. **Find each table edge in world frame**. Click "Publish Point" tool in
-   RViz and click on the front edge of table A. RViz logs `(x, y)` in
-   `/clicked_point`. Note the values.
+2. **Znajdź krawędź każdego biurka w world frame**. Kliknij narzędzie
+   "Publish Point" w RViz i kliknij na przedniej krawędzi biurka A.
+   RViz loguje `(x, y)` na `/clicked_point`. Zapisz wartości.
 
 3. **Predock pose**:
-   - `predock_x = table_edge_x - 0.50` (50 cm in front, so the dock
-     servo has room to advance ~13 cm without colliding)
+   - `predock_x = table_edge_x - 0.50` (50 cm przed, żeby dock servo
+     miał miejsce na ~13 cm advance bez kolizji)
    - `predock_y = table_edge_y` (centered)
-   - `predock_yaw` = orientation that makes the robot **face** the table.
-     For a table on the +X side: `0.0`. For −X side: `3.14159`. For −Y:
-     `-1.5708`. Etc.
+   - `predock_yaw` = orientacja kierująca robota **w stronę** biurka.
+     Dla biurka po stronie +X: `0.0`. Dla −X: `3.14159`. Dla −Y:
+     `-1.5708`. Itd.
 
-4. **Edit waypoints.yaml** with the new values:
+4. **Edytuj waypoints.yaml** nowymi wartościami:
    ```yaml
    tables:
      table_a:
        apriltag_id: 5
-       predock_x: 1.42      # measured: table edge at 1.92 m, robot 0.50 m back
+       predock_x: 1.42      # zmierzone: krawędź biurka 1.92 m, robot 0.50 m za
        predock_y: 0.00
        predock_yaw: 0.0
        dock_mode: apriltag
@@ -243,160 +246,167 @@ the X/Y/yaw of each predock so that:
        ...
    ```
 
-5. **Verify** by manually navigating to the predock and checking
-   `head_cam` view:
+5. **Zweryfikuj** ręcznie nawigując do predocka i sprawdzając widok
+   `head_cam`:
    ```bash
    ros2 launch g1_courier_bringup real.launch.py map:=$HOME/maps/lab.yaml
-   # In RViz, "2D Goal Pose" → click at predock_a position.
-   # Wait for nav to finish, then in another terminal:
+   # W RViz, "2D Goal Pose" → kliknij w pozycję predock_a.
+   # Po zakończeniu nav, w innym terminalu:
    ros2 topic echo /detections --once
-   # Expect tag id=5 with non-zero corners and centre near (640, 480)/2.
+   # Spodziewany tag id=5 z niezerowymi corners i centre blisko (640, 480)/2.
    ```
 
-6. Repeat for table B.
+6. Powtórz dla biurka B.
 
-## First mission run
+## Pierwsze uruchomienie misji
 
 ```bash
 ros2 launch g1_courier_bringup real.launch.py map:=$HOME/maps/lab.yaml
 ```
 
-Expected sequence:
+Spodziewana sekwencja:
 
-1. AMCL converges on the saved map (set initial pose in RViz if needed)
-2. Mission BT navigates to predock_a
-3. Dock APRILTAG to tag5 (30 cm), then to box tag10 (17 cm)
-4. `pick_box` runs P0..P6 sequence → `grasp_verified=true`
-5. Carry mode engaged (lower velocity caps from `safety.yaml`)
-6. Navigate to predock_b
-7. Dock LIDAR_LINE (camera occluded by box)
-8. `place_box` runs P5..P0 → `release_verified=true`
-9. Retreat 0.5 m, swap A/B, repeat
+1. AMCL zbiega na zapisaną mapę (ustaw initial pose w RViz jeśli trzeba)
+2. Mission BT nawiguje do predocka_a
+3. Dock APRILTAG do tag5 (30 cm), potem do box tag10 (17 cm)
+4. `pick_box` wykonuje sekwencję P0..P6 → `grasp_verified=true`
+5. Włącza się carry mode (niższe limity prędkości z `safety.yaml`)
+6. Nawigacja do predocka_b
+7. Dock LIDAR_LINE (kamera zasłonięta przez karton)
+8. `place_box` wykonuje P5..ZERO → `release_verified=true`
+9. Retreat 0.5 m, swap A/B, kolejny cykl
 
 ## Troubleshooting
 
-Each entry: **symptom** → diagnostic command → likely cause → fix.
+Każdy wpis: **objaw** → polecenie diagnostyczne → przyczyna → fix.
 
-### `colcon build` fails with `unitree_hg` not found
+### `colcon build` failuje na `unitree_hg` not found
 ```bash
-ls src/unitree_ros2/unitree_hg     # should exist
+ls src/unitree_ros2/unitree_hg     # powinno istnieć
 ```
-- **Cause**: `unitree_ros2` not cloned, or `example/COLCON_IGNORE` missing
-  causing the example pkg to fail.
-- **Fix**: clone per § "Workspace + sources"; `touch src/unitree_ros2/example/COLCON_IGNORE`.
+- **Przyczyna**: `unitree_ros2` nie sklonowany, albo brak
+  `example/COLCON_IGNORE` powodujący że pakiet example failuje.
+- **Fix**: clone wg § "Workspace + źródła";
+  `touch src/unitree_ros2/example/COLCON_IGNORE`.
 
-### `ros2 topic list` doesn't show `/lowstate` or `/livox/lidar`
+### `ros2 topic list` nie pokazuje `/lowstate` lub `/livox/lidar`
 ```bash
-echo $ROS_DOMAIN_ID                # must match robot
+echo $ROS_DOMAIN_ID                # musi być taki sam jak na robocie
 ros2 daemon stop && ros2 daemon start
 ros2 topic list
 ```
-- **Cause**: domain ID mismatch, daemon stale, or firmware bridge not running.
-- **Fix**: align `ROS_DOMAIN_ID` between robot and dev laptop, restart daemon.
+- **Przyczyna**: mismatch domain ID, stale daemon, albo firmware bridge
+  nie działa.
+- **Fix**: ujednolić `ROS_DOMAIN_ID` między robotem a dev laptopem,
+  zrestartować daemon.
 
-### AMCL doesn't converge (robot icon stays at origin or drifts)
+### AMCL nie zbiega (ikona robota stoi w origin lub dryfuje)
 ```bash
-ros2 topic echo /amcl_pose --once   # check covariance and pose
-ros2 topic hz /scan                 # should be ~10 Hz
-ros2 run tf2_tools view_frames      # confirm map → odom → base_link
+ros2 topic echo /amcl_pose --once   # sprawdź covariance i pose
+ros2 topic hz /scan                 # spodziewane ~10 Hz
+ros2 run tf2_tools view_frames      # potwierdź map → odom → base_link
 ```
-- **Cause 1**: no initial pose set.
-  **Fix**: in RViz click "2D Pose Estimate", drag arrow on the map at robot's actual location.
-- **Cause 2**: scan empty or very sparse.
-  **Fix**: check `pointcloud_to_laserscan.yaml` slice heights match
-  Livox mount; check `/livox/lidar` is publishing.
-- **Cause 3**: poor map coverage.
-  **Fix**: re-record map, walk through the transit area more thoroughly.
+- **Przyczyna 1**: brak initial pose.
+  **Fix**: w RViz kliknij "2D Pose Estimate", przeciągnij strzałkę
+  na mapie w rzeczywistej lokalizacji robota.
+- **Przyczyna 2**: scan pusty albo bardzo rzadki.
+  **Fix**: sprawdź `pointcloud_to_laserscan.yaml` slice heights pasują
+  do wysokości montażu Livoxa; sprawdź że `/livox/lidar` publikuje.
+- **Przyczyna 3**: słabe pokrycie mapy.
+  **Fix**: nagraj mapę ponownie, dokładniej przejdź przez obszar
+  tranzytowy.
 
-### Dock APRILTAG never converges
+### Dock APRILTAG nie zbiega
 ```bash
-ros2 topic echo /detections --once   # tag id 5 or 7 visible?
-python3 tools/cam_viewer.py          # visual check of bbox
+ros2 topic echo /detections --once   # tag id 5 albo 7 widoczny?
+python3 tools/cam_viewer.py          # wizualne sprawdzenie bbox
 ```
-- **Cause 1**: tag out of camera FoV from current predock pose.
-  **Fix**: edit `predock_x/y/yaw` in `waypoints.yaml` so the tag is
-  centred. Use cam_viewer to verify.
-- **Cause 2**: D435i image is unrectified or `camera_info` has wrong
+- **Przyczyna 1**: tag poza FoV kamery z aktualnej pozy predock.
+  **Fix**: edytuj `predock_x/y/yaw` w `waypoints.yaml` żeby tag był
+  wycentrowany. Użyj cam_viewer do weryfikacji.
+- **Przyczyna 2**: obraz D435i nieskorygowany albo `camera_info` ma złe
   intrinsics.
-  **Fix**: ensure `realsense2_camera` publishes `image_rect`; verify
-  `camera_info` matches D435i factory values (`fx ≈ 615`, `fy ≈ 615`,
-  `cx ≈ 320`, `cy ≈ 240` for 640×480).
-- **Cause 3**: lighting or motion blur.
-  **Fix**: increase exposure, slow down dock approach, raise tag size.
+  **Fix**: upewnij się że `realsense2_camera` publikuje `image_rect`;
+  zweryfikuj że `camera_info` pasuje do factory values D435i
+  (`fx ≈ 615`, `fy ≈ 615`, `cx ≈ 320`, `cy ≈ 240` dla 640×480).
+- **Przyczyna 3**: oświetlenie albo motion blur.
+  **Fix**: zwiększ ekspozycję, zwolnij dock approach, podnieś rozmiar
+  taga.
 
-### `grasp_verified=false` on every pick
+### `grasp_verified=false` na każdym pick
 ```bash
 ros2 topic echo /lowstate --field motor_state[<arm_idx>].tau_est
 ```
-- **Cause**: `grasp_tau_threshold_nm` in `arm_skills.yaml` doesn't
-  match real box weight + arm pose.
-- **Fix**: capture baseline τ before pick, capture τ after lift,
-  set threshold to 60% of the difference. Default 1.5 Nm is for ~1 kg
-  box; scale linearly.
+- **Przyczyna**: `grasp_tau_threshold_nm` w `arm_skills.yaml` nie pasuje
+  do realnej masy kartonu + pozy ramion.
+- **Fix**: zarejestruj baseline τ przed pickem, zarejestruj τ po lift,
+  ustaw threshold na 60% różnicy. Domyślne 1.5 Nm jest dla kartonu
+  ~1 kg; skaluj liniowo.
 
-### Dock LIDAR_LINE wanders / never settles
+### Dock LIDAR_LINE dryfuje / nigdy się nie ustabilizuje
 ```bash
 python3 tools/lidar_viewer.py
-# Drive to predock manually, watch the green RANSAC line.
+# Doprowadź ręcznie do predocka, obserwuj zieloną linię RANSAC.
 ```
-- **Cause 1**: forward window too wide, aligner picking up obstacles
-  beside the table.
-  **Fix**: narrow `lidar_line.window_*` in `docking.yaml`.
-- **Cause 2**: RANSAC inliers too loose, fitting noise.
-  **Fix**: tighten `lidar_line.inlier_threshold_m`.
-- **Cause 3**: wrong sign on yaw correction (was a known bug — see
+- **Przyczyna 1**: forward window za szeroki, aligner łapie przeszkody
+  obok biurka.
+  **Fix**: zwęź `lidar_line.window_*` w `docking.yaml`.
+- **Przyczyna 2**: inliers RANSAC za luźne, fituje szum.
+  **Fix**: zaostrz `lidar_line.inlier_threshold_m`.
+- **Przyczyna 3**: zły znak korekcji yaw (był znany bug — patrz
   CLAUDE.md "Dock LIDAR_LINE timeout").
-  **Fix**: verify `cmd.angular.z = +kp * yaw_err` in `LidarLineAligner`.
+  **Fix**: zweryfikuj `cmd.angular.z = +kp * yaw_err` w
+  `LidarLineAligner`.
 
-### Robot wobbles in carry mode (oscillates while walking)
+### Robot wibruje w carry mode (oscyluje podczas chodzenia)
 ```bash
-ros2 topic echo /cmd_vel --once     # see what arbiter is publishing
+ros2 topic echo /cmd_vel --once     # zobacz co arbiter publikuje
 ```
-- **Cause**: carry-mode velocity caps too high for current box weight.
-- **Fix**: tighten `max_vx_carry`, `max_vy_carry`, `max_vyaw_carry` in
-  `safety/config/safety.yaml`. Start with `0.2 / 0.1 / 0.3`.
+- **Przyczyna**: limity prędkości carry-mode za wysokie dla aktualnej
+  masy kartonu.
+- **Fix**: zaostrz `max_vx_carry`, `max_vy_carry`, `max_vyaw_carry` w
+  `safety/config/safety.yaml`. Zacznij od `0.2 / 0.1 / 0.3`.
 
-### Mission BT loops the same phase forever
+### Mission BT pętli się na tej samej fazie
 ```bash
 ros2 topic echo /mission_status --once
 ros2 node info /mission_node
 ```
-- **Cause**: a phase keeps timing out (e.g. dock A timeout on return
-  leg because head_cam is occluded by the carried box).
-- **Fix**: ensure `dock_mode: lidar_line` is set on the **return leg**
-  table in `waypoints.yaml`. Both `table_a` and `table_b` should be
-  `lidar_line` to be carry-independent.
+- **Przyczyna**: faza ciągle timeoutuje (np. dock A timeout na powrocie
+  bo head_cam zasłonięty przez niesiony karton).
+- **Fix**: upewnij się że `dock_mode: lidar_line` jest ustawiony na
+  biurku **powrotnym** w `waypoints.yaml`. Oba `table_a` i `table_b`
+  powinny być `lidar_line` żeby były carry-independent.
 
-### `nav2 controller "Passing new path" but robot stands still`
+### `nav2 controller "Passing new path" ale robot stoi`
 ```bash
-ros2 topic hz /cmd_vel              # 0 Hz means nothing reaches firmware
-ros2 topic hz /cmd_vel_nav          # 10 Hz means nav2 IS publishing
+ros2 topic hz /cmd_vel              # 0 Hz oznacza że nic nie dociera do firmware
+ros2 topic hz /cmd_vel_nav          # 10 Hz oznacza że nav2 PUBLIKUJE
 ```
-- **Cause**: jazzy `nav2_bringup` remaps `cmd_vel` → `cmd_vel_nav`.
-  Without `cmd_vel_arbiter` running in merge mode, the nav output
-  goes nowhere.
-- **Fix**: confirm `cmd_vel_arbiter` is running and subscribed to
-  `/cmd_vel_nav`. `real.launch.py` does this for you.
+- **Przyczyna**: jazzy `nav2_bringup` remappuje `cmd_vel` → `cmd_vel_nav`.
+  Bez `cmd_vel_arbiter` w trybie merge, output nav2 idzie w nicość.
+- **Fix**: potwierdź że `cmd_vel_arbiter` chodzi i subskrybuje
+  `/cmd_vel_nav`. `real.launch.py` to robi automatycznie.
 
-### Old fail-recipes worth keeping in mind
-Read `CLAUDE.md` § "Najczęstsze problemy które mogą wystąpić" — full
-catalogue of bugs encountered during sim development. Most are
-sim-specific (mac bridge, MuJoCo zombies) but a few apply to the real
-robot too: NavfnPlanner tolerance, APRILTAG `dyaw` sign, LiDAR_LINE
-yaw sign.
+### Stare fail-recipes warte pamiętania
+Przeczytaj `CLAUDE.md` § "Najczęstsze problemy które mogą wystąpić" —
+pełen katalog bugów napotkanych podczas developmentu sim. Większość
+sim-specific (mac bridge, MuJoCo zombies), ale kilka ma zastosowanie
+też do realnego robota: NavfnPlanner tolerance, sign `dyaw` APRILTAG,
+sign yaw LiDAR_LINE.
 
 ## Action contracts cheat sheet
 
-When firing actions manually for debug, use these payloads as
-templates. Full IDL: `src/g1_courier_msgs/{action,srv}/`.
+Gdy odpalasz akcje ręcznie do debugu, używaj tych payloadów jako
+szablonów. Pełen IDL: `src/g1_courier_msgs/{action,srv}/`.
 
 ```bash
-# /pick_box  — nominal P0..P6 keyframes:
+# /pick_box  — nominalne keyframes P0..P6:
 ros2 action send_goal /pick_box g1_courier_msgs/action/PickBox \
   '{box_pose: {header: {frame_id: ""}}, sequence_name: "pick_box", timeout_s: 30.0}' \
   --feedback
 
-# /place_box  — nominal P5..ZERO:
+# /place_box  — nominalne P5..ZERO:
 ros2 action send_goal /place_box g1_courier_msgs/action/PlaceBox \
   '{target_pose: {header: {frame_id: ""}}, sequence_name: "place_box", timeout_s: 30.0}' \
   --feedback
@@ -408,7 +418,7 @@ ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
     xy_tolerance_m: 0.03, yaw_tolerance_rad: 0.05, timeout_s: 25.0}' \
   --feedback
 
-# /dock_to_table LIDAR_LINE (predock at world (4.10, 0, 0)):
+# /dock_to_table LIDAR_LINE (predock world (4.10, 0, 0)):
 ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
   '{mode: 1, apriltag_id: 0,
     target_pose: {header: {frame_id: "map"},
@@ -416,7 +426,7 @@ ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable \
     xy_tolerance_m: 0.03, yaw_tolerance_rad: 0.05, timeout_s: 25.0}' \
   --feedback
 
-# /courier/navigate_to_pose (predock_a at (1.42, 0, 0) facing +X):
+# /courier/navigate_to_pose (predock_a w (1.42, 0, 0) facing +X):
 ros2 action send_goal /courier/navigate_to_pose \
   g1_courier_msgs/action/NavigateToPose \
   '{target_pose: {header: {frame_id: "map"},
@@ -426,61 +436,61 @@ ros2 action send_goal /courier/navigate_to_pose \
     xy_tolerance_m: 0.0, yaw_tolerance_rad: 0.0, timeout_s: 60.0}' \
   --feedback
 
-# /retreat — open-loop reverse 0.5 m at 0.15 m/s:
+# /retreat — open-loop wycofanie 0.5 m z prędkością 0.15 m/s:
 ros2 action send_goal /retreat g1_courier_msgs/action/Retreat \
   '{distance_m: 0.5, speed_mps: 0.15, timeout_s: 10.0}' \
   --feedback
 
-# /safety/set_carry_mode — engage carry-mode caps:
+# /safety/set_carry_mode — włącz limity carry-mode:
 ros2 service call /safety/set_carry_mode g1_courier_msgs/srv/SetCarryMode \
   '{carrying: true}'
 
-# /safety/set_freeze — emergency freeze (zero cmd_vel):
+# /safety/set_freeze — emergency freeze (zerowe cmd_vel):
 ros2 service call /safety/set_freeze g1_courier_msgs/srv/SetFreeze \
   '{freeze: true}'
 ```
 
-To **cancel** an action mid-flight: `Ctrl+C` in the `send_goal`
-terminal. The action server respects cancel and stops cleanly.
+Żeby **anulować** akcję w trakcie: `Ctrl+C` w terminalu `send_goal`.
+Action server respektuje cancel i czysto się zatrzymuje.
 
-To **list** all available actions:
+Żeby **wylistować** wszystkie dostępne akcje:
 ```bash
 ros2 action list
-ros2 action info /pick_box        # shows server + client(s)
+ros2 action info /pick_box        # pokazuje server + client(s)
 ```
 
-## Configs that you may need to tune
+## Configi które prawdopodobnie zechcesz tunować
 
-| File | What to tune | When |
+| Plik | Co tunować | Kiedy |
 |---|---|---|
-| `mission/config/waypoints.yaml` | predock per table | every new map |
-| `arm_skills/config/arm_skills.yaml` | `grasp_tau_threshold_nm` | per box weight |
-| `docking/config/docking.yaml` | dock kp_xy/kp_yaw, target_distance | first deploy + per‐lighting |
-| `safety/config/safety.yaml` | carry-mode v limits | per box weight + balance |
-| `bringup/config/nav2_params.yaml` | costmap inflation, footprint | per lab clutter |
+| `mission/config/waypoints.yaml` | predock per-biurko | Każda nowa mapa |
+| `arm_skills/config/arm_skills.yaml` | `grasp_tau_threshold_nm` | Per masa kartonu |
+| `docking/config/docking.yaml` | dock kp_xy/kp_yaw, target_distance | Pierwszy deploy + per oświetlenie |
+| `safety/config/safety.yaml` | limity carry-mode v | Per masa kartonu + balans |
+| `bringup/config/nav2_params.yaml` | inflation costmapy, footprint | Per zatłoczenie laba |
 
-## Diagnostic tools
+## Narzędzia diagnostyczne
 
-In a separate terminal alongside `real.launch.py`:
+W osobnym terminalu obok `real.launch.py`:
 
 ```bash
-python3 ~/g1_courier_ws/tools/cam_viewer.py     # tag bbox + PnP distance
+python3 ~/g1_courier_ws/tools/cam_viewer.py     # bbox tag + dystans PnP
 python3 ~/g1_courier_ws/tools/lidar_viewer.py   # /scan top-down + RANSAC
 python3 ~/g1_courier_ws/tools/plan_viz.py       # nav2 plan + AMCL pose
 ```
 
 ## Sim parity
 
-The same code paths run in sim (`courier-sim` branch). Differences:
+Te same code paths chodzą w sim (branch `courier-sim`). Różnice:
 
-- Sim runs MuJoCo via `g1_courier_sim/sim_bridge/`, real uses Unitree
-  firmware bridges.
-- Sim sets `kinematic_mode: true` on `pick`/`place` to bypass PD-via-DDS
-  jitter; real keeps default `false`.
-- Sim publishes `/parcel_state` to release a weld constraint on placement;
-  real has no such topic (real fingers handle physical release).
-- Sim uses `pupil_apriltags` inside the bridge process; real uses
-  `apriltag_ros` as a separate node consuming D435i frames.
+- Sim odpala MuJoCo przez `g1_courier_sim/sim_bridge/`, real używa
+  firmware bridge'y Unitree.
+- Sim ustawia `kinematic_mode: true` na `pick`/`place` żeby obejść
+  jitter PD-via-DDS; real zostaje `false`.
+- Sim publikuje `/parcel_state` żeby uwolnić weld constraint przy
+  placu; real nie ma takiego topiku (palce fizyczne ogarniają release).
+- Sim używa `pupil_apriltags` w procesie bridge'a; real używa
+  `apriltag_ros` jako osobnego node'a konsumującego klatki D435i.
 
-The mission BT, dock action server, arm controller, and nav2 stack are
-**identical** across branches.
+Mission BT, action server docka, arm controller, i nav2 stack są
+**identyczne** między branchami.

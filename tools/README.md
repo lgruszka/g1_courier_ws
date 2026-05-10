@@ -1,54 +1,56 @@
-# Diagnostic Tools
+# Narzędzia diagnostyczne
 
-Standalone Python helpers that subscribe to ROS2 topics. Work transparently
-with both sim and real robot.
+Standalone helpery Pythona subskrybujące topiki ROS2. Działają
+identycznie z sim i z realnym robotem.
 
 ## `cam_viewer.py`
 
-Live `head_cam` preview with AprilTag bounding box and PnP distance overlay.
+Live preview `head_cam` z bbox AprilTagów i overlay'em dystansu z PnP.
 
 ```bash
 source ~/g1_courier_ws/install/setup.bash
 python3 tools/cam_viewer.py
 ```
 
-Subscribes:
+Subskrybuje:
 - `/head_cam/image_raw` (sensor_msgs/Image, rgb8)
 - `/detections` (apriltag_msgs/AprilTagDetectionArray)
 - `/camera_info` (sensor_msgs/CameraInfo, transient_local)
 
-Per detection runs `cv2.solvePnPGeneric` (same as `dock_action_server`) and
-displays `z_c` (depth along optical axis), full 3D distance, and `(x, y)`
-offset in cam frame.
+Per detekcja uruchamia `cv2.solvePnPGeneric` (ten sam algorytm co w
+`dock_action_server`) i wyświetla `z_c` (głębokość wzdłuż osi optycznej),
+pełen dystans 3D, plus offset `(x, y)` w cam frame.
 
-Keys: `q` quit, `s` snapshot to `/tmp/cam_snap.png`.
+Klawisze: `q` quit, `s` snapshot do `/tmp/cam_snap.png`.
 
 ## `lidar_viewer.py`
 
-Live 2D top-down view of `/scan` with RANSAC line fit (matches
-`dock_action_server.LidarLineAligner` algorithm).
+Live top-down view 2D z `/scan` z RANSAC line fit (dopasowany do
+algorytmu `dock_action_server.LidarLineAligner`).
 
 ```bash
 python3 tools/lidar_viewer.py
 ```
 
-Visualises:
-- All scan points (gray = outside forward window, blue = inside aligner's
-  ±30° cone, red = RANSAC inliers)
-- Forward window cone (`angle_min .. angle_max`)
-- `target_distance` line (where dock_to_table converges)
-- RANSAC fit line (green) — what dock_action_server sees as "table edge"
+Wizualizuje:
+- Wszystkie punkty scanu (szary = poza forward window, niebieski =
+  w stożku ±30° aligner'a, czerwony = inliers RANSAC)
+- Stożek forward window (`angle_min .. angle_max`)
+- Linia `target_distance` (gdzie zbiega dock_to_table)
+- Linia RANSAC fit (zielona) — co dock_action_server widzi jako
+  "krawędź biurka"
 
-Keys: `q` quit, `s` snapshot to `/tmp/lidar_snap.png`.
+Klawisze: `q` quit, `s` snapshot do `/tmp/lidar_snap.png`.
 
 ## `plan_viz.py`
 
-Renders nav2 global plan + AMCL pose + costmap inflation to
-`/tmp/nav_plan.png` on every plan update. Use with auto-reload viewer:
+Renderuje globalny plan nav2 + AMCL pose + inflation costmapy do
+`/tmp/nav_plan.png` przy każdym update'cie planu. Używaj z viewerem
+auto-reload:
 
 ```bash
 python3 tools/plan_viz.py &
-feh --reload 1 /tmp/nav_plan.png   # or eog + manual F5
+feh --reload 1 /tmp/nav_plan.png   # albo eog + ręczne F5
 ```
 
-Subscribes `/map`, `/global_costmap/costmap`, `/plan`, `/amcl_pose`.
+Subskrybuje `/map`, `/global_costmap/costmap`, `/plan`, `/amcl_pose`.
