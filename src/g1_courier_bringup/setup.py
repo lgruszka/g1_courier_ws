@@ -25,4 +25,9 @@ setup(
     maintainer_email='lukasz.gruszka90@gmail.com',
     description='Bringup for the G1 courier stack.',
     license='Apache-2.0',
+    entry_points={
+        'console_scripts': [
+            'odom_tf_relay = g1_courier_bringup.odom_tf_relay:main',
+        ],
+    },
 )

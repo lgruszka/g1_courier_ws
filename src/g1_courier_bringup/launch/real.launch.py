@@ -34,6 +34,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node, SetRemap
@@ -58,6 +59,9 @@ def generate_launch_description() -> LaunchDescription:
         Command(['xacro ', LaunchConfiguration('urdf_path')]),
         value_type=str,
     )
+    odom_topic = LaunchConfiguration('odom_topic')
+    odom_frame = LaunchConfiguration('odom_frame')
+    base_frame = LaunchConfiguration('base_frame')
 
     return LaunchDescription([
         DeclareLaunchArgument('nav2_params',
@@ -65,6 +69,26 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('map',
             default_value=os.path.join(bringup, 'maps', 'lab.yaml'),
             description='Saved 2D map for AMCL.'),
+        DeclareLaunchArgument(
+            'odom_topic',
+            default_value='/dog_odom',
+            description='Real odometry topic used as source for odom->base TF relay.',
+        ),
+        DeclareLaunchArgument(
+            'odom_frame',
+            default_value='odom',
+            description='Global odometry frame name for localization and nav.',
+        ),
+        DeclareLaunchArgument(
+            'base_frame',
+            default_value='base_link',
+            description='Robot base frame name used by nav and TF relay.',
+        ),
+        DeclareLaunchArgument(
+            'publish_odom_tf',
+            default_value='true',
+            description='Publish odom->base_link TF from odometry topic.',
+        ),
         DeclareLaunchArgument('urdf_path', default_value=default_urdf,
             description='Absolute path to G1 URDF (from unitree_ros/robots/g1_description).'),
         DeclareLaunchArgument('cloud_topic', default_value='/utlidar/cloud_livox_360mid',
@@ -111,11 +135,28 @@ def generate_launch_description() -> LaunchDescription:
             executable='pointcloud_to_laserscan_node',
             name='pointcloud_to_laserscan',
             parameters=[
+                
                 os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
                 {'input_queue_size': 50},
+            ,
+                {'target_frame': base_frame},
             ],
             remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
                         ('scan', '/scan')],
+        ),
+
+        Node(
+            package='g1_courier_bringup',
+            executable='odom_tf_relay',
+            name='odom_tf_relay',
+            condition=IfCondition(LaunchConfiguration('publish_odom_tf')),
+            parameters=[{
+                'odom_topic': odom_topic,
+                'odom_frame': odom_frame,
+                'base_frame': base_frame,
+                'use_msg_frame_ids': False,
+                'use_msg_stamp': True,
+            }],
         ),
 
         # AprilTag detector.

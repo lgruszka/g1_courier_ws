@@ -23,6 +23,9 @@ Override defaults via launch args:
       cloud_topic:=/livox/lidar \\
       lidar_frame_id:=livox_frame \\
       urdf_path:=$HOME/path/to/g1.urdf
+
+On ROS2 Humble, async_slam_toolbox_node is a regular rclcpp node, not a
+lifecycle node, so it must not be managed by nav2_lifecycle_manager.
 """
 from __future__ import annotations
 
@@ -32,6 +35,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -61,6 +65,13 @@ def generate_launch_description() -> LaunchDescription:
         Command(['xacro ', LaunchConfiguration('urdf_path')]),
         value_type=str,
     )
+
+    cloud_topic = LaunchConfiguration('cloud_topic')
+    scan_topic = LaunchConfiguration('scan_topic')
+    odom_topic = LaunchConfiguration('odom_topic')
+    odom_frame = LaunchConfiguration('odom_frame')
+    base_frame = LaunchConfiguration('base_frame')
+    lidar_frame = LaunchConfiguration('lidar_frame')
 
     return LaunchDescription([
         urdf_arg,
@@ -103,6 +114,86 @@ def generate_launch_description() -> LaunchDescription:
         # PointCloud2 -> 2D LaserScan for slam_toolbox.
         # input_queue_size bumped from default 10 — Livox publishes ~10 Hz
         # large clouds and TF lookup latency can fill the default queue.
+        DeclareLaunchArgument(
+            'cloud_topic',
+            default_value='/utlidar/cloud_livox_mid360',
+            description='Input PointCloud2 topic from Livox driver.',
+        ),
+        DeclareLaunchArgument(
+            'scan_topic',
+            default_value='/scan',
+            description='Output LaserScan topic used by slam_toolbox.',
+        ),
+        DeclareLaunchArgument(
+            'odom_topic',
+            default_value='/dog_odom',
+            description='Real odometry topic used as source for odom->base TF relay.',
+        ),
+        DeclareLaunchArgument(
+            'odom_frame',
+            default_value='odom',
+            description='Global odometry frame name for slam_toolbox.',
+        ),
+        DeclareLaunchArgument(
+            'base_frame',
+            default_value='base_link',
+            description='Robot base frame for scan projection and slam_toolbox.',
+        ),
+        DeclareLaunchArgument(
+            'lidar_frame',
+            default_value='livox_frame',
+            description='Frame id of incoming Livox point clouds.',
+        ),
+        DeclareLaunchArgument(
+            'publish_lidar_static_tf',
+            default_value='true',
+            description='Publish base_frame->lidar_frame static TF fallback for setups with missing driver TF.',
+        ),
+        DeclareLaunchArgument('lidar_x', default_value='0.0'),
+        DeclareLaunchArgument('lidar_y', default_value='0.0'),
+        DeclareLaunchArgument('lidar_z', default_value='0.0'),
+        DeclareLaunchArgument('lidar_roll', default_value='0.0'),
+        DeclareLaunchArgument('lidar_pitch', default_value='0.0'),
+        DeclareLaunchArgument('lidar_yaw', default_value='0.0'),
+        DeclareLaunchArgument(
+            'publish_odom_tf',
+            default_value='true',
+            description='Publish odom->base_link TF from odometry topic.',
+        ),
+
+        # Fallback static TF to avoid message filter backlog when the runtime
+        # environment does not provide livox_frame -> base_link.
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_to_lidar_static_tf',
+            condition=IfCondition(LaunchConfiguration('publish_lidar_static_tf')),
+            arguments=[
+                '--x', LaunchConfiguration('lidar_x'),
+                '--y', LaunchConfiguration('lidar_y'),
+                '--z', LaunchConfiguration('lidar_z'),
+                '--yaw', LaunchConfiguration('lidar_yaw'),
+                '--pitch', LaunchConfiguration('lidar_pitch'),
+                '--roll', LaunchConfiguration('lidar_roll'),
+                '--frame-id', base_frame,
+                '--child-frame-id', lidar_frame,
+            ],
+        ),
+
+        Node(
+            package='g1_courier_bringup',
+            executable='odom_tf_relay',
+            name='odom_tf_relay',
+            condition=IfCondition(LaunchConfiguration('publish_odom_tf')),
+            parameters=[{
+                'odom_topic': odom_topic,
+                'odom_frame': odom_frame,
+                'base_frame': base_frame,
+                'use_msg_frame_ids': False,
+                'use_msg_stamp': True,
+            }],
+        ),
+
         Node(
             package='pointcloud_to_laserscan',
             executable='pointcloud_to_laserscan_node',
@@ -119,14 +210,14 @@ def generate_launch_description() -> LaunchDescription:
             package='slam_toolbox',
             executable='async_slam_toolbox_node',
             name='slam_toolbox',
-            parameters=[os.path.join(bringup, 'config', 'slam_toolbox_mapping.yaml')],
-        ),
-
-        # Lifecycle manager so slam_toolbox auto-activates.
-        Node(
-            package='nav2_lifecycle_manager',
-            executable='lifecycle_manager',
-            name='lifecycle_manager_slam',
-            parameters=[{'autostart': True, 'node_names': ['slam_toolbox']}],
+            output='screen',
+            parameters=[
+                os.path.join(bringup, 'config', 'slam_toolbox_mapping.yaml'),
+                {
+                    'scan_topic': scan_topic,
+                    'odom_frame': odom_frame,
+                    'base_frame': base_frame,
+                },
+            ],
         ),
     ])
