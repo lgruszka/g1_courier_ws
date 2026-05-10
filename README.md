@@ -18,11 +18,14 @@ biurkami oznaczonymi AprilTagami.
 3. **Build workspace'u** ([5 minut](#build-i-source)).
 4. **Odpal pełną misję** ([Pełne uruchomienie misji](#pełne-uruchomienie-misji)) —
    jeden launch podnosi całość.
-5. **Gdy coś się zepsuje**:
+5. **Pierwsze uruchomienie krok po kroku** (od zimnego startu po pełen
+   cykl A↔B, każdy krok z checkpointem diagnostycznym):
+   [docs/deployment_test_procedure.md](docs/deployment_test_procedure.md).
+6. **Gdy coś się zepsuje**:
    - [Pojedyncze skille — debug](#pojedyncze-skille--debug) — odpal jedną akcję, zobacz co się dzieje
    - [Podgląd diagnostyczny](#podgląd-diagnostyczny) — wizualizacja kamery, lidaru, nav
    - [docs/deployment_guide.md](docs/deployment_guide.md) — pełen troubleshooting
-6. **Zanim zmienisz kod**, przeczytaj
+7. **Zanim zmienisz kod**, przeczytaj
    [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — to jest źródło prawdy
    dla decyzji projektowych i konwencji.
 
@@ -444,6 +447,9 @@ livox_ros_driver2     Sterownik Livox Mid-360
   granice warstw, anti-patterns. **Czytaj zanim zmienisz core kod.**
 - [docs/deployment_guide.md](docs/deployment_guide.md) — pełen setup
   sprzętowy, procedura kalibracji, troubleshooting.
+- [docs/deployment_test_procedure.md](docs/deployment_test_procedure.md) —
+  procedura testowa krok po kroku (od zimnego startu do pełnego cyklu
+  A↔B), każdy krok z checkpointem diagnostycznym.
 - [tools/README.md](tools/README.md) — szczegóły podglądów diagnostycznych.
 - [docs/phases/](docs/phases/) — historyczna kronika faz developmentu
   (skupiona na sim; przydatna do zrozumienia *dlaczego* obecny design
