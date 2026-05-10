@@ -28,7 +28,7 @@ class PickActionServer(Node):
         self.declare_parameter('kd', 2.0)
         # Strict on real robot, can be turned off in MuJoCo where tau_est
         # depends on whatever pose the fallen-over robot is currently in
-        # rather than on grasping a real parcel.
+        # rather than on grasping a real box.
         self.declare_parameter('require_grasp_verified', True)
         # Sim-only — see ArmControllerConfig.kinematic_mode docstring.
         self.declare_parameter('kinematic_mode', False)

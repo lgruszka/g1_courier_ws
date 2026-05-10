@@ -106,10 +106,10 @@ python3 ~/g1_courier_ws/tools/plan_viz.py       # nav2 plan + AMCL pose
    - Apply latest `/cmd_vel` to mocap anchor (kinematic mocap movement)
    - Apply sticky `kinematic_mode` arm targets
    - `mj_step` physics
-   - `TwoHandGrasp.update_per_tick` (parcel midpoint tracking)
+   - `TwoHandGrasp.update_per_tick` (box midpoint tracking)
    - Render head_cam + AprilTag detection + publish `rt/head_cam/image_raw` + `rt/detections`
    - 360° lidar scan via `mj_ray()` + publish `rt/scan`
-   - 1 Hz GEOM log (pelvis/parcel/cam world XYZ for debugging)
+   - 1 Hz GEOM log (pelvis/box/cam world XYZ for debugging)
 4. Publishes/subscribes via `unitree_sdk2py.ChannelPublisher/Subscriber` over CycloneDDS:
    - publishes: `rt/lowstate`, `rt/scan`, `rt/detections`, `rt/head_cam/image_raw`, `rt/camera_info`, `rt/grasp_status`
    - subscribes: `rt/lowcmd`, `rt/cmd_vel`, `rt/parcel_state`

@@ -47,15 +47,15 @@ from .behaviors import (
 STAGE_PAUSE_S = 0.2
 
 
-# AprilTag id stuck on the parcel front face (added in Faza 1.5+ scene XML
+# AprilTag id stuck on the box front face (added in Faza 1.5+ scene XML
 # update). pickup uses APRILTAG dock to this tag for grasp alignment.
 PARCEL_TAG_ID = 10
 # target_distance is along camera's optical axis (depth in cam frame), not
 # horizontal world distance. With head_cam pitched 42° down + cam world Z=1.20
-# vs parcel tag10 Z=0.975, depth-to-tag has both horizontal and vertical
+# vs box tag10 Z=0.975, depth-to-tag has both horizontal and vertical
 # components. Dropping to 0.17 puts pelvis too far forward (wrist 5cm past
-# parcel center) AND places tag at -41° below cam axis (outside ±30° FoV).
-# 0.25 puts pelvis at ~0.87 → wrist at ~1.15 (front quarter of parcel, palm-
+# box center) AND places tag at -41° below cam axis (outside ±30° FoV).
+# 0.25 puts pelvis at ~0.87 → wrist at ~1.15 (front quarter of box, palm-
 # press grips OK) and tag at -18° (well within FoV for tracking during servo).
 PARCEL_DOCK_DISTANCE_M = 0.50
 
@@ -161,10 +161,10 @@ def _phase_pickup(node: Node, table: TableConfig) -> py_trees.composites.Sequenc
     """Pickup at table_X — head_cam unoccluded:
 
     1. nav2 brings robot roughly to predock (~0.60 m before table edge)
-    2. APRILTAG dock to parcel tag10 — precise grasp alignment via the
-       parcel itself (table tags 5/7 are not used; pickup pose is parcel-
+    2. APRILTAG dock to box tag10 — precise grasp alignment via the
+       box itself (table tags 5/7 are not used; pickup pose is box-
        relative, not table-relative)
-    3. Pick sequence — palm-press friction holds the parcel
+    3. Pick sequence — palm-press friction holds the box
     """
     seq = py_trees.composites.Sequence(name=f'pickup_at_{table.name}', memory=True)
     seq.add_children([
@@ -190,7 +190,7 @@ def _phase_pickup(node: Node, table: TableConfig) -> py_trees.composites.Sequenc
         Pick(f'pick_at_{table.name}', node),
         Pause(f'pause_after_pick_{table.name}', node, duration_s=STAGE_PAUSE_S),
         SetCarry('carry_on_after_pick', node, carrying=True),
-        # Retreat 0.5 m back from table — after parcel-relative dock + pick,
+        # Retreat 0.5 m back from table — after box-relative dock + pick,
         # robot pelvis is ~0.10 m from table front edge (well inside the
         # global_costmap inflation_radius=0.40). Without this retreat the
         # next NavigateTo (transfer to other table) fails: planner returns
@@ -201,10 +201,10 @@ def _phase_pickup(node: Node, table: TableConfig) -> py_trees.composites.Sequenc
 
 
 def _phase_transfer(node: Node, table: TableConfig) -> py_trees.composites.Sequence:
-    """Transfer to table_X with parcel — head_cam occluded by carried parcel,
-    so use LIDAR_LINE (RANSAC line fit on pelvis-mounted 360° lidar — parcel-
+    """Transfer to table_X with box — head_cam occluded by carried box,
+    so use LIDAR_LINE (RANSAC line fit on pelvis-mounted 360° lidar — box-
     independent). nav2 plans smooth detour around tables; place sequence
-    lowers parcel onto table, palm-press releases via friction physics."""
+    lowers box onto table, palm-press releases via friction physics."""
     seq = py_trees.composites.Sequence(name=f'transfer_to_{table.name}', memory=True)
     seq.add_children([
         NavigateTo(
@@ -226,7 +226,7 @@ def _phase_transfer(node: Node, table: TableConfig) -> py_trees.composites.Seque
         # 1.0 m retreat (was 0.5) — after place robot pelvis ~0.93 m from table
         # front; with inflation 0.35 around table, planner needs ≥0.40 m gap to
         # plan next cycle. 1.0 m retreat puts robot at ~−0.07 m (well clear)
-        # with parcel still in head_cam FoV for next dock approach.
+        # with box still in head_cam FoV for next dock approach.
         RetreatBy('retreat_after_place', node, distance_m=1.0),
     ])
     return seq

@@ -12,7 +12,7 @@ Output:
 
 Modes:
   - carry_mode (service `/safety/set_carry_mode`): when on, output is clamped
-    to lower max_vx / max_vy / max_vyaw so the parcel stays steady on the arms.
+    to lower max_vx / max_vy / max_vyaw so the box stays steady on the arms.
 
 Inactivity:
   - If no fresh input from any source for `cmd_timeout_s`, publishes zero.
@@ -67,7 +67,7 @@ class CmdVelArbiter(Node):
         self.declare_parameter('max_vx_normal', 0.6)
         self.declare_parameter('max_vy_normal', 0.4)
         self.declare_parameter('max_vyaw_normal', 0.8)
-        # carry-mode limits (parcel held)
+        # carry-mode limits (box held)
         self.declare_parameter('max_vx_carry', 0.3)
         self.declare_parameter('max_vy_carry', 0.2)
         self.declare_parameter('max_vyaw_carry', 0.4)

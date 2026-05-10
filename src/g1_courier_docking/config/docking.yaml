@@ -19,17 +19,17 @@ dock_action_server:
                                    # to ~16 cm overshoot at z_c=0.33 target. 0.05 m/s → ~5 mm/tick
                                    # → ~5 cm overshoot, within loosened xy_tolerance.
     apriltag.max_vy: 0.10    # default — tested working in iter_1 with 8/16 stages OK
-    apriltag.max_vyaw: 0.4    # active — needed for real robot where parcel may
+    apriltag.max_vyaw: 0.4    # active — needed for real robot where box may
                                # land at non-zero yaw. Sim noise (PnP IPPE flip
                                # ±0.6 rad) is filtered by yaw_deadband_rad below.
     apriltag.yaw_deadband_rad: 0.10   # ~5.7° — ignore dyaw smaller than this.
                                        # Suppresses PnP/IPPE noise without losing
                                        # the ability to correct genuine rotation
-                                       # (real parcel placed at angle).
+                                       # (real box placed at angle).
     apriltag.target_distance_m: 0.30       # default for dock-to-table (table front edge tag).
                                             # mission BT can override per-call via
                                             # target_pose.pose.position.z (e.g. 0.17 for
-                                            # dock-to-parcel where tag10 is on parcel front face).
+                                            # dock-to-box where tag10 is on box front face).
     apriltag.tag_size_m: 0.16              # full edge length, matches mac scene tag plate
     # Fallback pinhole intrinsics used until mac side starts publishing
     # rt/camera_info. Values match the mac head_cam (fovy=60°, 640x480):
@@ -41,7 +41,7 @@ dock_action_server:
     apriltag.cy: 240.0
 
     lidar.target_distance_m: 0.30          # used only for transfer (place) phase — head_cam
-                                            # occluded by carried parcel, so RANSAC line fit
+                                            # occluded by carried box, so RANSAC line fit
                                             # against table edge instead of APRILTAG.
     lidar.range_min_m: 0.05                # must be < target_distance_m, otherwise RANSAC
                                             # filters out table edge when robot is too close

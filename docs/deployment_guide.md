@@ -13,7 +13,7 @@ Unitree G1 with Livox Mid-360 and RealSense D435i.
 - [ ] Two desks (table A, table B) marked with AprilTag `tag36h11`:
   - Table A → id `5`, side length 0.16 m, mounted on table front edge
   - Table B → id `7`, same family/size
-- [ ] Cardboard parcel with tag `id=10` on top face (size 0.10 m)
+- [ ] Cardboard box with tag `id=10` on top face (size 0.10 m)
 - [ ] WiFi or ethernet between onboard PC and dev laptop (for RViz / debug)
 
 ## Software install (one-time)
@@ -161,11 +161,11 @@ Expected sequence:
 
 1. AMCL converges on the saved map (set initial pose in RViz if needed)
 2. Mission BT navigates to predock_a
-3. Dock APRILTAG to tag5 (30 cm), then to parcel tag10 (17 cm)
+3. Dock APRILTAG to tag5 (30 cm), then to box tag10 (17 cm)
 4. `pick_box` runs P0..P6 sequence → `grasp_verified=true`
 5. Carry mode engaged (lower velocity caps from `safety.yaml`)
 6. Navigate to predock_b
-7. Dock LIDAR_LINE (camera occluded by parcel)
+7. Dock LIDAR_LINE (camera occluded by box)
 8. `place_box` runs P5..P0 → `release_verified=true`
 9. Retreat 0.5 m, swap A/B, repeat
 
@@ -174,7 +174,7 @@ Fail signs and where to look:
 - **AMCL pose drifts**: re-record map, increase coverage in transit area
 - **`grasp_verified=false`**: retune `grasp_tau_threshold_nm` in
   `src/g1_courier_arm_skills/config/arm_skills.yaml`. Real value depends
-  on parcel weight — start at 1.5, raise if false negatives.
+  on box weight — start at 1.5, raise if false negatives.
 - **Dock APRILTAG never converges**: check `head_cam` actually publishes
   rectified image (`image_rect`); verify intrinsics in `camera_info`
   match D435i factory values
@@ -188,9 +188,9 @@ Fail signs and where to look:
 | File | What to tune | When |
 |---|---|---|
 | `mission/config/waypoints.yaml` | predock per table | every new map |
-| `arm_skills/config/arm_skills.yaml` | `grasp_tau_threshold_nm` | per parcel weight |
+| `arm_skills/config/arm_skills.yaml` | `grasp_tau_threshold_nm` | per box weight |
 | `docking/config/docking.yaml` | dock kp_xy/kp_yaw, target_distance | first deploy + per‐lighting |
-| `safety/config/safety.yaml` | carry-mode v limits | per parcel weight + balance |
+| `safety/config/safety.yaml` | carry-mode v limits | per box weight + balance |
 | `bringup/config/nav2_params.yaml` | costmap inflation, footprint | per lab clutter |
 
 ## Diagnostic tools

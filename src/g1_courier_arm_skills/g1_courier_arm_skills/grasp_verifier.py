@@ -1,7 +1,7 @@
 """Grasp verification by joint torque deviation.
 
 The principle: take a baseline of joint torques on the carrying arm just before
-contact, then after lift compare. A held parcel produces a sustained tau shift
+contact, then after lift compare. A held box produces a sustained tau shift
 proportional to its mass and the arm geometry. No load -> tau returns to baseline.
 """
 from __future__ import annotations

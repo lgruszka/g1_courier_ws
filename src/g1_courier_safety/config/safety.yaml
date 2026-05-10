@@ -9,7 +9,7 @@ cmd_vel_arbiter:
     max_vy_normal: 0.4
     max_vyaw_normal: 0.8
 
-    # Carry-mode limits (parcel held). Tighter so the arms stay steady.
-    max_vx_carry: 0.3        # TODO_TUNE: walking speed with parcel
+    # Carry-mode limits (box held). Tighter so the arms stay steady.
+    max_vx_carry: 0.3        # TODO_TUNE: walking speed with box
     max_vy_carry: 0.2
     max_vyaw_carry: 0.4

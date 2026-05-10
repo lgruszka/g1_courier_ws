@@ -1,6 +1,6 @@
 # g1_courier_ws
 
-ROS2 stack for a Unitree G1 humanoid carrying a parcel between two desks marked with AprilTags.
+ROS2 stack for a Unitree G1 humanoid carrying a box between two desks marked with AprilTags.
 
 This workspace is a **starter package**. It defines the architecture, the contracts between layers (actions/services/topics), and provides scaffolds for every node. Some implementations are full, others are deliberate TODOs marked in code.
 
@@ -99,7 +99,7 @@ The BT has retry policies on dock and pick. A failed verify_grasp re-runs dock +
 
 ## How the camera-occlusion problem is solved
 
-When the robot carries the parcel, the front camera view is mostly blocked, so AprilTag detection becomes unreliable. The stack handles this by **never relying on AprilTag for global localization**. Globally we always run AMCL on a 2D laser scan derived from the LiDAR. AprilTag is used only to refine the final approach to the pick desk (because the pick must hit ±2-3 cm tolerance). For the place desk we approach with two cheaper means combined:
+When the robot carries the box, the front camera view is mostly blocked, so AprilTag detection becomes unreliable. The stack handles this by **never relying on AprilTag for global localization**. Globally we always run AMCL on a 2D laser scan derived from the LiDAR. AprilTag is used only to refine the final approach to the pick desk (because the pick must hit ±2-3 cm tolerance). For the place desk we approach with two cheaper means combined:
 
 1. AMCL pose, which is already accurate to roughly ±5 cm in a well-mapped environment.
 2. LiDAR line fitting against the table edge (`MODE_LIDAR_LINE`), which corrects the residual lateral and yaw error directly from the scan, regardless of camera state.
@@ -190,9 +190,9 @@ python3 tools/plan_viz.py       # nav2 plan + AMCL pose + costmap inflation
   sentinel (`mode==99`) for sim-side joint forcing.
 - `PickBox` and `PlaceBox` action servers with grasp_verifier integration.
 - `DockToTable` action server with all three modes:
-  - `MODE_APRILTAG` — 6-DoF PnP visual servo (parcel tag10)
+  - `MODE_APRILTAG` — 6-DoF PnP visual servo (box tag10)
   - `MODE_LIDAR_LINE` — RANSAC line fit on 2D scan, perpendicular alignment
-    (used during transfer when carried parcel occludes head_cam)
+    (used during transfer when carried box occludes head_cam)
   - `MODE_AMCL_ONLY` — trust AMCL (fallback)
 - `cmd_vel_arbiter` with priority routing (dock → retreat → nav → /cmd_vel),
   carry-mode velocity caps, freeze service, e-stop latch.

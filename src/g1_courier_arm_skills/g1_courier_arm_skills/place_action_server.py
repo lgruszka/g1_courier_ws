@@ -27,7 +27,7 @@ class PlaceActionServer(Node):
         self.declare_parameter('kp', 80.0)
         self.declare_parameter('kd', 2.0)
         # Strict on real robot, can be turned off in MuJoCo where tau_est
-        # reflects pose changes rather than the (absent) parcel weight.
+        # reflects pose changes rather than the (absent) box weight.
         self.declare_parameter('require_release_verified', True)
         # Sim-only — see ArmControllerConfig.kinematic_mode docstring.
         self.declare_parameter('kinematic_mode', False)
@@ -92,7 +92,7 @@ class PlaceActionServer(Node):
             # before we start moving — otherwise both publishers fight on
             # /lowcmd and arms ping-pong between two poses.
             self._bundle.announce_take_control()
-            # Baseline is taken with parcel in hand so we can detect drop.
+            # Baseline is taken with box in hand so we can detect drop.
             self._bundle.verifier.capture_baseline()
             self._bundle.controller.run_sequence(
                 sequence_name,
