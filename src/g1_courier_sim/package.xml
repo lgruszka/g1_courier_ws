@@ -2,7 +2,15 @@
 <package format="3">
   <name>g1_courier_sim</name>
   <version>0.1.0</version>
-  <description>Sim-only nodes. Phase 0: kinematic cmd_vel bridge (no physics).</description>
+  <description>
+    Sim-only nodes for G1 Courier. Two parts:
+    - Linux helper nodes (sim_cmd_vel_bridge for kinematic /odom integration,
+      fake action stubs for Phase 0 tests, nav2_navigate_proxy adapter).
+    - sim_bridge/ — bundled MuJoCo bridge for Ubuntu native sim path
+      (Option C). Requires Python deps: mujoco, unitree_sdk2py,
+      pupil-apriltags, pygame, opencv-python (pip install). Plus G1 mesh
+      STL files from upstream unitree_mujoco — see docs/sim_setup_ubuntu.md.
+  </description>
   <maintainer email="lukasz.gruszka90@gmail.com">Lukasz Gruszka</maintainer>
   <license>Apache-2.0</license>
 

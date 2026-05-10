@@ -112,61 +112,126 @@ The dock action takes a `mode` argument so the mission BT chooses per-table what
 - `cmd_vel_arbiter` exposes a `carry_mode` topic. With box held it caps `max_vx`, `max_vy` and `max_vyaw` at a reduced level (config) and switches the duration field accordingly.
 - After `place_box` the arms are brought to zero with weight ramped to 0, returning control to the FSM.
 
-## Running
+## Branches
 
-### 1. Build
+This repo lives on three branches on the team GitLab (`gitlab.com/iAndy77/j2s`):
+
+| Branch | Use case |
+|---|---|
+| **`courier-sim`** | Ubuntu native sim — primary path for team development |
+| **`courier-deploy`** | Real Unitree G1 + Livox Mid-360 deployment |
+| `courier-sim-legacy-mac` | Frozen snapshot of the original mac MuJoCo + Linux Parallels setup (not maintained, kept for historical reference) |
+
+Choose the branch matching your target.
+
+## Running (sim — `courier-sim` branch)
+
+### 1. Install Ubuntu native sim deps
+
+See `docs/sim_setup_ubuntu.md` for the full procedure (one-time).
+TL;DR: `pip install mujoco unitree_sdk2py pupil-apriltags pygame opencv-python`,
+clone upstream `unitree_mujoco` for G1 mesh STL files, symlink them into
+`src/g1_courier_sim/g1_courier_sim/sim_bridge/assets/meshes`.
+
+### 2. Build
+
 ```bash
-cd g1_courier_ws
+cd ~/g1_courier_ws
 colcon build --symlink-install
 source install/setup.bash
 ```
 
-### 2. Map an environment (one-off)
+### 3. Run sim
+
+Two terminals:
+
+```bash
+# Terminal 1 — MuJoCo bridge (opens viewer)
+ros2 launch g1_courier_sim sim_bridge.launch.py
+
+# Terminal 2 — full mission stack (nav2 + dock + arm + mission BT)
+ros2 launch g1_courier_bringup phase1_full.launch.py
+```
+
+### 4. Optional — diagnostic viewers
+
+```bash
+python3 tools/cam_viewer.py     # head_cam preview + AprilTag overlays
+python3 tools/lidar_viewer.py   # 2D top-down /scan + RANSAC line fit
+python3 tools/plan_viz.py       # nav2 plan + AMCL pose + costmap inflation
+```
+
+### 5. Build a custom map (optional, one-off)
+
 ```bash
 ros2 launch g1_courier_bringup mapping.launch.py
-# drive the robot manually around both tables
-ros2 run nav2_map_server map_saver_cli -f ~/maps/courier_lab
+# Drive teleop, e.g. ros2 run teleop_twist_keyboard teleop_twist_keyboard
+ros2 run nav2_map_server map_saver_cli -f ~/maps/lab
+# Then update phase1_full.launch.py 'map' arg to point at your new map.yaml.
 ```
 
-### 3. Run the full mission
+### 6. Single-skill debug
+
 ```bash
-ros2 launch g1_courier_bringup courier_full.launch.py \
-  map:=$HOME/maps/courier_lab.yaml
+ros2 action send_goal /pick_box g1_courier_msgs/action/PickBox "{}"
+ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable "{...}"
 ```
 
-### 4. Run a single skill (debug)
-```bash
-ros2 action send_goal /pick_box g1_courier_msgs/action/PickBox "{ ... }"
-ros2 action send_goal /dock_to_table g1_courier_msgs/action/DockToTable "{ ... }"
+## Running (real robot — `courier-deploy` branch)
+
+See `docs/deployment_guide.md` on that branch.
+
+## What is implemented
+
+- All action / service / message interfaces (`g1_courier_msgs`).
+- Parametric arm controller with CRC, keyframe library (`P0..P6` from real
+  G1 calibration), weight ramping, grasp verifier hook, kinematic-mode
+  sentinel (`mode==99`) for sim-side joint forcing.
+- `PickBox` and `PlaceBox` action servers with grasp_verifier integration.
+- `DockToTable` action server with all three modes:
+  - `MODE_APRILTAG` — 6-DoF PnP visual servo (parcel tag10)
+  - `MODE_LIDAR_LINE` — RANSAC line fit on 2D scan, perpendicular alignment
+    (used during transfer when carried parcel occludes head_cam)
+  - `MODE_AMCL_ONLY` — trust AMCL (fallback)
+- `cmd_vel_arbiter` with priority routing (dock → retreat → nav → /cmd_vel),
+  carry-mode velocity caps, freeze service, e-stop latch.
+- Behavior Tree mission cycle: `pickup_at_a → transfer_b → pickup_b →
+  transfer_a` with `[STAGE START]`/`[STAGE END]` timing logs and visual
+  pauses between stages.
+- nav2 stack: AMCL OmniMotionModel + NavfnPlanner A\* + RotationShim →
+  RegulatedPurePursuit + costmaps with obstacle/inflation layers.
+- Linux-native MuJoCo bridge in `g1_courier_sim/sim_bridge/`:
+  - `TwoHandGrasp` midpoint kinematic tracking (replaces single-hand weld)
+  - kinematic mocap movement (welded pelvis + cmd_vel integration)
+  - 360° lidar via `mj_ray()`
+  - head_cam render + `pupil_apriltags` detection + image publish
+  - `reset_all` payload for clean iteration loops
+  - 1 Hz GEOM diagnostic log
+
+## Required external dependencies
+
+apt (ROS2 Jazzy):
+```
+ros-jazzy-nav2-bringup
+ros-jazzy-slam-toolbox
+ros-jazzy-pointcloud-to-laserscan
+ros-jazzy-py-trees-ros
+ros-jazzy-rosidl-generator-dds-idl
+ros-jazzy-apriltag-msgs
+ros-jazzy-tf2-geometry-msgs
 ```
 
-## What is implemented vs. TODO
-
-Implemented:
-- All action / service / message interfaces.
-- Refactored, parametric arm controller with CRC, keyframe library, weight ramping, grasp verifier hook.
-- `PickBox` and `PlaceBox` action servers built on top.
-- `DockToTable` action server with `MODE_APRILTAG` (6-DoF visual servo) and `MODE_AMCL_ONLY` (trust AMCL).
-- `cmd_vel_arbiter` with priority, freeze, carry mode and e-stop.
-- Behavior Tree skeleton for the two-table cycle.
-- Launch files and config templates for nav2, slam_toolbox, amcl, pointcloud_to_laserscan and AprilTag.
-
-TODO (clearly marked in code):
-- `MODE_LIDAR_LINE` aligner (skeleton ready, line-fit logic missing).
-- IK-based parametric correction in arm controller (currently linear delta hook).
-- Real `box_pose` extraction from AprilTag inside dock action (placeholder uses tag pose verbatim).
-- Tuning of all gains, tolerances and timeouts (placeholders flagged with `TODO_TUNE`).
-- `unitree_cmd_vel_bridge` is reused from `j2s-light_tracking` and not vendored here. Add a symlink or copy when wiring to the robot.
-
-## Required external dependencies (apt + pip)
-
+pip (sim only — Ubuntu native MuJoCo bridge):
 ```
-ros-${ROS_DISTRO}-nav2-bringup
-ros-${ROS_DISTRO}-slam-toolbox
-ros-${ROS_DISTRO}-pointcloud-to-laserscan
-ros-${ROS_DISTRO}-apriltag-ros
-ros-${ROS_DISTRO}-tf2-geometry-msgs
-ros-${ROS_DISTRO}-py-trees-ros
-unitree_api  (Unitree)
-unitree_hg   (Unitree)
+mujoco
+unitree_sdk2py
+pupil-apriltags
+pygame
+opencv-python
+```
+
+ROS2 source (clone into `src/`):
+```
+unitree_ros2  (provides unitree_hg, unitree_api, unitree_go message types)
+              https://github.com/unitreerobotics/unitree_ros2
 ```
