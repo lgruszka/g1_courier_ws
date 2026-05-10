@@ -10,8 +10,8 @@ Ubuntu 24.04 machine. No mac, no Parallels, no DDS bridge between hosts.
 
 ## Prerequisites
 
-- Ubuntu 24.04 with ROS2 Jazzy installed
-- Python 3.12 (default on Jazzy)
+- Ubuntu 22.04 with ROS2 Humble installed
+- Python 3.10 (default on Humble)
 - Working OpenGL (for MuJoCo viewer + camera rendering)
 
 ## One-time install
@@ -20,12 +20,12 @@ Ubuntu 24.04 machine. No mac, no Parallels, no DDS bridge between hosts.
 
 ```bash
 sudo apt install -y \
-  ros-jazzy-nav2-bringup \
-  ros-jazzy-slam-toolbox \
-  ros-jazzy-pointcloud-to-laserscan \
-  ros-jazzy-py-trees-ros \
-  ros-jazzy-rosidl-generator-dds-idl \
-  ros-jazzy-apriltag-msgs
+  ros-humble-nav2-bringup \
+  ros-humble-slam-toolbox \
+  ros-humble-pointcloud-to-laserscan \
+  ros-humble-py-trees-ros \
+  ros-humble-rosidl-generator-dds-idl \
+  ros-humble-apriltag-msgs
 
 # Workspace
 mkdir -p ~/g1_courier_ws/src && cd ~/g1_courier_ws/src

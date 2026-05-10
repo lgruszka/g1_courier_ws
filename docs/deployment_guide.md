@@ -35,20 +35,20 @@ przejdź od razu do [Pierwsze uruchomienie misji](#pierwsze-uruchomienie-misji).
 
 ## Instalacja oprogramowania (jednorazowo)
 
-### 1. ROS2 Jazzy + pakiety systemowe
+### 1. ROS2 Humble + pakiety systemowe
 
 ```bash
 sudo apt install -y \
-  ros-jazzy-nav2-bringup \
-  ros-jazzy-slam-toolbox \
-  ros-jazzy-pointcloud-to-laserscan \
-  ros-jazzy-py-trees-ros \
-  ros-jazzy-rosidl-generator-dds-idl \
-  ros-jazzy-apriltag-ros \
-  ros-jazzy-apriltag-msgs \
-  ros-jazzy-tf2-geometry-msgs \
-  ros-jazzy-realsense2-camera \
-  ros-jazzy-teleop-twist-keyboard
+  ros-humble-nav2-bringup \
+  ros-humble-slam-toolbox \
+  ros-humble-pointcloud-to-laserscan \
+  ros-humble-py-trees-ros \
+  ros-humble-rosidl-generator-dds-idl \
+  ros-humble-apriltag-ros \
+  ros-humble-apriltag-msgs \
+  ros-humble-tf2-geometry-msgs \
+  ros-humble-realsense2-camera \
+  ros-humble-teleop-twist-keyboard
 ```
 
 ### 2. Workspace + źródła
@@ -383,7 +383,7 @@ ros2 node info /mission_node
 ros2 topic hz /cmd_vel              # 0 Hz oznacza że nic nie dociera do firmware
 ros2 topic hz /cmd_vel_nav          # 10 Hz oznacza że nav2 PUBLIKUJE
 ```
-- **Przyczyna**: jazzy `nav2_bringup` remappuje `cmd_vel` → `cmd_vel_nav`.
+- **Przyczyna**: humble `nav2_bringup` remappuje `cmd_vel` → `cmd_vel_nav`.
   Bez `cmd_vel_arbiter` w trybie merge, output nav2 idzie w nicość.
 - **Fix**: potwierdź że `cmd_vel_arbiter` chodzi i subskrybuje
   `/cmd_vel_nav`. `real.launch.py` to robi automatycznie.

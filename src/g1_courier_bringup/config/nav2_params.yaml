@@ -201,7 +201,7 @@ behavior_server:
     transform_tolerance: 0.2
     use_sim_time: false
 
-# Stub configs for nav2 jazzy bringup nodes we don't actively use. Empty
+# Stub configs for nav2 bringup nodes we don't actively use. Empty
 # lists ('[]') and dicts ('{}') confuse the parameter parser ('expected
 # float/int/str/bool/bytes, got tuple ()'), so we supply one disabled item
 # of the right type instead — node configures cleanly but does nothing.

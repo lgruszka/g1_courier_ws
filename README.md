@@ -409,18 +409,18 @@ need to tune".
 
 ## Wymagane zależności zewnętrzne
 
-apt (ROS2 Jazzy):
+apt (ROS2 Humble):
 ```
-ros-jazzy-nav2-bringup
-ros-jazzy-slam-toolbox
-ros-jazzy-pointcloud-to-laserscan
-ros-jazzy-py-trees-ros
-ros-jazzy-rosidl-generator-dds-idl
-ros-jazzy-apriltag-ros
-ros-jazzy-apriltag-msgs
-ros-jazzy-tf2-geometry-msgs
-ros-jazzy-realsense2-camera
-ros-jazzy-teleop-twist-keyboard
+ros-humble-nav2-bringup
+ros-humble-slam-toolbox
+ros-humble-pointcloud-to-laserscan
+ros-humble-py-trees-ros
+ros-humble-rosidl-generator-dds-idl
+ros-humble-apriltag-ros
+ros-humble-apriltag-msgs
+ros-humble-tf2-geometry-msgs
+ros-humble-realsense2-camera
+ros-humble-teleop-twist-keyboard
 ```
 
 ROS2 source (clone do `src/`):

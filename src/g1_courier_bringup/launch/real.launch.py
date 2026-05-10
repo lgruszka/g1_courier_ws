@@ -27,7 +27,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetRemap
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -68,16 +68,23 @@ def generate_launch_description() -> LaunchDescription:
             ],
         ),
 
-        # Nav2 (planner, controller, BT navigator, AMCL).
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory('nav2_bringup'), 'launch', 'bringup_launch.py')),
-            launch_arguments={
-                'map': map_yaml,
-                'use_sim_time': 'false',
-                'params_file': nav2_params,
-            }.items(),
-        ),
+        # Nav2 (planner, controller, BT navigator, AMCL). SetRemap forces
+        # nav2 to publish on /cmd_vel_nav so cmd_vel_arbiter can merge it
+        # with dock + retreat. Required on Humble (where nav2 publishes
+        # on /cmd_vel by default); no-op on Jazzy (nav2_bringup already
+        # remaps internally there).
+        GroupAction([
+            SetRemap(src='/cmd_vel', dst='/cmd_vel_nav'),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(os.path.join(
+                    get_package_share_directory('nav2_bringup'), 'launch', 'bringup_launch.py')),
+                launch_arguments={
+                    'map': map_yaml,
+                    'use_sim_time': 'false',
+                    'params_file': nav2_params,
+                }.items(),
+            ),
+        ]),
 
         # Safety / arbitration.
         Node(
