@@ -109,39 +109,62 @@ o3d.visualization.draw_geometries([pcd])
 
 Plus kurs ma dedicated viewer: `python3 pcd_viewer.py g1_map.pcd`.
 
-## Konwersja 3D PCD → 2D PGM (dla porównania z slam_toolbox)
+## Konwersja 3D PCD → 2D PGM (do nav2)
 
-Kurs ma skrypty `pcd_height_filter.py` (cut floor) + `pcd2pgm_v2.py`
-(2D projection). Setup:
+FAST-LIO zapisuje 3D point cloud, ale nav2 wymaga 2D PGM. Konwerter
+w naszym repo: `tools/fastlio_pcd_to_pgm.py`.
 
 ```bash
-# Filtr podłogi (cut wszystko poniżej -0.80 m):
-python3 ~/AI/ai_rl_course/... pcd_height_filter.py g1_map.pcd --z-threshold -0.8
-# tworzy: g1_map_z-0.80_filtered.pcd
+# Zależności (jednorazowo):
+pip install "open3d>=0.17,<0.19" "numpy==1.26.4" pillow
 
-# Konwersja do 2D PGM:
-python3 ~/AI/ai_rl_course/... pcd2pgm_v2.py g1_map_z-0.80_filtered.pcd \
-  --out-dir ~/maps \
-  --name lab_fastlio \
-  --resolution 0.05 \
-  --z-thresh 0.2
-# tworzy: ~/maps/lab_fastlio.pgm + lab_fastlio.yaml
+# Konwersja:
+mkdir -p ~/maps
+python3 ~/g1_courier_ws/tools/fastlio_pcd_to_pgm.py g1_map.pcd \
+    --out-dir ~/maps \
+    --name lab_fastlio \
+    --resolution 0.05 \
+    --z-min -0.4 \
+    --z-max 1.5
 ```
 
-(Konkretne ścieżki do skryptów zależą od organizacji kursu — patrz
-`~/AI/ai_rl_course/` w katalogach `pcd_to_pgm/` lub podobnych.)
+Tworzy:
+- `~/maps/lab_fastlio.pgm` (obraz mapy 2D)
+- `~/maps/lab_fastlio.yaml` (metadane: origin, resolution, thresholds)
 
-Plus alternatywa bez skryptów kursu — Open3D w 5 linijkach:
-```python
-import open3d as o3d
-import numpy as np
-pcd = o3d.io.read_point_cloud('g1_map.pcd')
-pts = np.asarray(pcd.points)
-# Filtr Z (cut floor + ceiling):
-mask = (pts[:, 2] > -0.7) & (pts[:, 2] < 0.5)
-xy = pts[mask, :2]
-# Rasterize do PGM... (use cv2 albo PIL)
+Parametry:
+- `--z-min -0.4` — wszystko poniżej (podłoga, kable) wycięte
+- `--z-max 1.5` — wszystko powyżej (sufit, lampy) wycięte
+- `--resolution 0.05` — 5 cm/pixel, standard nav2
+- `--min-points-per-cell 2` (default) — komórka "occupied" gdy ≥2 punkty trafiły
+
+## Użyj mapy FAST-LIO w nav2 (identycznie jak slam_toolbox)
+
+```bash
+ros2 launch g1_courier_bringup real.launch.py map:=$HOME/maps/lab_fastlio.yaml
 ```
+
+Format jest identyczny ze slam_toolbox-owym (`lab.yaml`/`lab.pgm`).
+AMCL ładuje ją tak samo, planner planuje identycznie. **Nie ma żadnej
+różnicy z perspektywy nav2** poza tym jak została zbudowana.
+
+Plus możesz mieć **obie mapy obok siebie** i wybierać przez `map:=...`:
+- `~/maps/lab.yaml` (slam_toolbox)
+- `~/maps/lab_fastlio.yaml` (FAST-LIO)
+
+Porównaj po cyklu A↔B który daje stabilniejszą lokalizację AMCL.
+
+## Alternatywne podejście — FAST-LIO odometry obok slam_toolbox
+
+Jeśli FAST-LIO mapa działa lepiej **ale** chcesz zachować slam_toolbox
+loop closure: użyj FAST-LIO **tylko jako odometry source**.
+- `/Odometry` (FAST-LIO) → relay → `odom → base_link` TF
+- slam_toolbox nadal mapuje + ma loop closure
+- AMCL nadal lokalizuje w 2D
+
+To wymaga adaptacji `odom_tf_relay` (dziś czyta `/dog_odom` od Tomasza,
+można skierować na `/Odometry`). ~1-godzinna zmiana. Daj znać jeśli
+chcesz tę ścieżkę.
 
 ## Porównanie wyników z slam_toolbox
 
