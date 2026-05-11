@@ -92,11 +92,15 @@ PICK_BOX = ArmSequence(
     final_weight=1.0,
 )
 
-# rece_pozycja_8_5_odlozenie: q_act -> P5 -> P4 -> P3 -> P2 -> 0 -> release
+# rece_pozycja_8_5_odlozenie: q_act -> P5 (snap) -> P5 (hold) -> P4 -> P3 ->
+# P2 -> 0 -> release. Matches j2s-light_tracking ArmSkillController:
+# PLACE_T_SNAP_S=1.0 + PLACE_POSITIONS=[P5, P4, P3, P2] iterated with
+# previous=P5 so first iter is a 2 s hold at P5 before lowering.
 PLACE_BOX = ArmSequence(
     name='place_box',
     stages=[
         TrajectoryStage(P5, 1.0, label='snap_to_P5'),
+        TrajectoryStage(P5, 2.0, label='hold_P5'),
         TrajectoryStage(P4, 2.0, label='lower'),
         TrajectoryStage(P3, 2.0, label='release_height'),
         TrajectoryStage(P2, 2.0, label='retract'),

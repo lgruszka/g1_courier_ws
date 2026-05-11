@@ -8,7 +8,6 @@ import threading
 from typing import Optional
 
 from rclpy.node import Node
-from std_msgs.msg import String
 
 try:
     from unitree_hg.msg import LowCmd, LowState
@@ -24,13 +23,6 @@ from .arm_controller import ArmController, ArmControllerConfig
 from .grasp_verifier import GraspVerifier
 from .keyframes import ARM_JOINTS
 from .lowcmd_crc import LowCmdCrc
-
-
-# Topic used to coordinate hand-off between arm action servers running in
-# separate processes. When a server is about to start a new sequence, it
-# publishes its node name; every other arm server's hold thread stops
-# immediately so it doesn't fight the freshly-started sequence over /lowcmd.
-ARM_TAKE_CONTROL_TOPIC = '/arms/take_control'
 
 
 class _Publisher:
@@ -54,7 +46,6 @@ class ArmRosBundle:
         self._node = node
         self._lock = threading.Lock()
         self._low_state: Optional[object] = None
-        self._self_name = node.get_name()
 
         self._arm_pub = node.create_publisher(LowCmd, arm_topic, 10)
         self._low_sub = node.create_subscription(
@@ -74,31 +65,6 @@ class ArmRosBundle:
             threshold_nm=grasp_threshold_nm,
             log_fn=lambda msg: node.get_logger().info(f'[verify] {msg}'),
         )
-
-        # Cross-process release channel. When another arm server announces
-        # "I'm taking control" we drop our hold thread so it doesn't fight
-        # the new sequence over /lowcmd. Our own announcements are ignored.
-        self._take_control_pub = node.create_publisher(
-            String, ARM_TAKE_CONTROL_TOPIC, 10,
-        )
-        node.create_subscription(
-            String, ARM_TAKE_CONTROL_TOPIC, self._on_take_control, 10,
-        )
-
-    def announce_take_control(self) -> None:
-        """Call before run_sequence() to silence other servers' hold loops."""
-        msg = String()
-        msg.data = self._self_name
-        self._take_control_pub.publish(msg)
-
-    def _on_take_control(self, msg) -> None:
-        if msg.data == self._self_name:
-            return  # our own announcement; nothing to do
-        # Stop our hold loop. Safe to call when no hold is running.
-        try:
-            self.controller._stop_hold()
-        except Exception:
-            pass
 
     def _on_low_state(self, msg) -> None:
         with self._lock:

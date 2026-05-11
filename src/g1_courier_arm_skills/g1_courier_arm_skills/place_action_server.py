@@ -88,10 +88,6 @@ class PlaceActionServer(Node):
             goal_handle.publish_feedback(fb)
 
         try:
-            # Tell any other arm server (pick) to release its hold thread
-            # before we start moving — otherwise both publishers fight on
-            # /lowcmd and arms ping-pong between two poses.
-            self._bundle.announce_take_control()
             # Baseline is taken with box in hand so we can detect drop.
             self._bundle.verifier.capture_baseline()
             self._bundle.controller.run_sequence(
