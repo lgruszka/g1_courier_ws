@@ -50,6 +50,19 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
+def _floor(v: float, min_v: float) -> float:
+    """Boost |v| to min_v while keeping sign — but only when v is intentionally
+    non-zero. v=0 stays 0 (freeze / no source). Used for hardware that has a
+    minimum velocity threshold (G1 sport API ~0.11 m/s below which the firmware
+    refuses to step). Set min_v=0.0 to disable."""
+    import math
+    if min_v <= 0.0:
+        return v
+    if abs(v) < 1e-6:
+        return 0.0
+    return math.copysign(max(abs(v), min_v), v)
+
+
 class CmdVelArbiter(Node):
     def __init__(self) -> None:
         super().__init__('cmd_vel_arbiter')
@@ -71,6 +84,12 @@ class CmdVelArbiter(Node):
         self.declare_parameter('max_vx_carry', 0.3)
         self.declare_parameter('max_vy_carry', 0.2)
         self.declare_parameter('max_vyaw_carry', 0.4)
+        # Minimum-velocity floor (hardware threshold). Below this the G1 sport
+        # API refuses to step. Set 0.0 to disable. Default disabled — enable
+        # per-platform in safety.yaml.
+        self.declare_parameter('min_vx_threshold', 0.0)
+        self.declare_parameter('min_vy_threshold', 0.0)
+        self.declare_parameter('min_vyaw_threshold', 0.0)
 
         self._timeout_ns = int(float(self.get_parameter('cmd_timeout_s').value) * 1e9)
         self._max_normal = (
@@ -82,6 +101,11 @@ class CmdVelArbiter(Node):
             float(self.get_parameter('max_vx_carry').value),
             float(self.get_parameter('max_vy_carry').value),
             float(self.get_parameter('max_vyaw_carry').value),
+        )
+        self._min_floor = (
+            float(self.get_parameter('min_vx_threshold').value),
+            float(self.get_parameter('min_vy_threshold').value),
+            float(self.get_parameter('min_vyaw_threshold').value),
         )
 
         # State.
@@ -159,10 +183,11 @@ class CmdVelArbiter(Node):
 
     def _apply_caps(self, cmd: Twist) -> Twist:
         vx_max, vy_max, vyaw_max = self._max_carry if self._carrying else self._max_normal
+        vx_min, vy_min, vyaw_min = self._min_floor
         out = Twist()
-        out.linear.x = _clamp(cmd.linear.x, -vx_max, vx_max)
-        out.linear.y = _clamp(cmd.linear.y, -vy_max, vy_max)
-        out.angular.z = _clamp(cmd.angular.z, -vyaw_max, vyaw_max)
+        out.linear.x = _floor(_clamp(cmd.linear.x, -vx_max, vx_max), vx_min)
+        out.linear.y = _floor(_clamp(cmd.linear.y, -vy_max, vy_max), vy_min)
+        out.angular.z = _floor(_clamp(cmd.angular.z, -vyaw_max, vyaw_max), vyaw_min)
         return out
 
     # ---------- main loop ----------

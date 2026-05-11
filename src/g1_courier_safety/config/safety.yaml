@@ -13,3 +13,11 @@ cmd_vel_arbiter:
     max_vx_carry: 0.3        # TODO_TUNE: walking speed with box
     max_vy_carry: 0.2
     max_vyaw_carry: 0.4
+
+    # Minimum-velocity floor (G1 sport API hardware threshold).
+    # Below ~0.11 m/s firmware refuses to step (interpretuje jako STÓJ).
+    # Floor boost |v| do tej wartości gdy v != 0, zero pozostaje zerem.
+    # Zmierzone na realnym G1 — confirmed via teleop.
+    min_vx_threshold: 0.12
+    min_vy_threshold: 0.12
+    min_vyaw_threshold: 0.0   # rotacja typowo nie ma problemu
