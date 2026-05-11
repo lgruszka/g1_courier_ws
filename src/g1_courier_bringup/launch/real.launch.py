@@ -203,6 +203,14 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[os.path.join(safety_share, 'config', 'safety.yaml')],
         ),
 
+        # /cmd_vel → Unitree sport API Request (firmware bridge).
+        # Vendored 1:1 z j2s light_tracking_lts (prod-tested).
+        Node(
+            package='g1_courier_safety',
+            executable='unitree_cmd_vel_bridge_node',
+            name='unitree_cmd_vel_bridge_node',
+        ),
+
         # Docking action server.
         Node(
             package='g1_courier_docking',
