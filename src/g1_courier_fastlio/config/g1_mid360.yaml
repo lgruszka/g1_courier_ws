@@ -1,0 +1,62 @@
+# FAST-LIO2 config dla Unitree G1 + Livox Mid-360 + IMU.
+# Skopiowany 1:1 z kursu AI/RL G1, lekcja L33 (Fast-LIO).
+# Wartości IMU noise są specyficznie tunowane pod G1 — bardzo niski
+# gyro covariance + ekstremalnie niski gyro bias żeby zapobiec drift
+# w długich sesjach.
+/**:
+    ros__parameters:
+        feature_extract_enable: false
+        point_filter_num: 3
+        max_iteration: 3
+        filter_size_surf: 0.5
+        filter_size_map: 0.5
+        cube_side_length: 1000.0
+        runtime_pos_log_enable: true
+        map_file_path: "./g1_map.pcd"   # ścieżka zapisu mapy (pcd_save_en musi być true)
+
+        common:
+            lid_topic:  "/livox/lidar"
+            imu_topic:  "/livox/imu"
+            time_sync_en: false           # Mid-360 lidar+IMU już synced hardware'owo
+            time_offset_lidar_to_imu: 0.0
+
+        preprocess:
+            lidar_type: 4                  # 4 = generic PointCloud2; 1=Livox proprietary
+            scan_line: 4
+            blind: 0.5
+            timestamp_unit: 3
+            scan_rate: 10
+
+        mapping:
+            # Critical parameters for rotation stability — pod G1 wykalibrowane:
+            acc_cov: 0.1
+            gyr_cov: 0.001                 # very low — trust gyroscope
+            b_acc_cov: 0.0001
+            b_gyr_cov: 0.0000001           # extremely low — prevent gyro drift
+
+            fov_degree: 360.0
+            det_range: 50.0
+            extrinsic_est_en: false        # true włącza auto-calibrate LiDAR↔IMU
+                                            # (przydatne przy pierwszym uruchomieniu;
+                                            # po skalibrowaniu wyłącz)
+
+            # Extrinsics LiDAR → IMU. Mid-360 ma wbudowany IMU, te wartości
+            # zakładają oba w jednej obudowie z identity orientation.
+            # Sprawdź na realnym G1 — jeśli Livox upside-down/rotated,
+            # ustaw odpowiedni R i T.
+            extrinsic_T: [ 0.0, 0.0, 0.0 ]
+            extrinsic_R: [ 1.0,  0.0,  0.0,
+                           0.0,  1.0,  0.0,
+                           0.0,  0.0,  1.0 ]
+
+        publish:
+            path_en: true                  # /path topic dla RViz
+            effect_map_en: false
+            map_en: true                   # /cloud_registered_body topic
+            scan_publish_en: true          # /cloud_registered topic
+            dense_publish_en: false
+            scan_bodyframe_pub_en: true    # /cloud_registered_body_frame topic
+
+        pcd_save:
+            pcd_save_en: true              # zapisywać mapę przy serwisie /map_save
+            interval: -1                   # -1 = jeden plik na końcu (zamiast incremental)

@@ -19,10 +19,14 @@ slam_toolbox:
 
     # Map params
     resolution: 0.05
-    max_laser_range: 8.0     # mac scene 8x6 m, max diag ~10 m; LaserScan range_max=10
-    minimum_time_interval: 0.1
-    minimum_travel_distance: 0.2
-    minimum_travel_heading: 0.2
+    max_laser_range: 20.0    # Mid-360 sięga 40 m; 20 wystarcza dla typowego labu i
+                              # gives connectivity między mapami localymi w dłuższym
+                              # korytarzu. Pasuje też range_max=25.0 w pointcloud_to_laserscan.
+    minimum_time_interval: 0.2     # 5 Hz max update — G1 chodzi wolno, częstsze update
+                                    # daje więcej constraintów do scan matchera
+    minimum_travel_distance: 0.05  # 5 cm — z minimum_velocity_floor 0.12 m/s = update ~0.4s
+                                    # (poprzednio 0.2 m = update co ~1.7s, mapa fragmentaryczna)
+    minimum_travel_heading: 0.05   # ~3°
     transform_publish_period: 0.05
     map_update_interval: 1.0
     transform_timeout: 0.5

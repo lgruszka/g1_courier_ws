@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>g1_courier_fastlio</name>
+  <version>0.1.0</version>
+  <description>
+    Standalone FAST-LIO2 mapping/localization for G1 + Livox Mid-360.
+    Alternatywne podejście do slam_toolbox: LiDAR-Inertial Odometry z
+    Mid-360 + IMU coupling. Output: 3D point cloud map (.pcd) + low-drift
+    /Odometry. Pakiet zawiera launch + config wykalibrowany pod G1 (per
+    L33_Fast-LIO.md z kursu AI/RL G1). Wymaga external clone'a
+    fast_lio_ros2 do src/ — patrz docs/fast_lio_setup.md.
+  </description>
+  <maintainer email="lukasz.gruszka90@gmail.com">Lukasz Gruszka</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>fast_lio</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

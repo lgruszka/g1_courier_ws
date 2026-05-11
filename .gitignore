@@ -35,3 +35,7 @@ src/unitree_ros2/example/
 .env
 *.local
 src/unitree_ros/
+src/fast_lio_ros2/
+src/livox_ros_driver2/
+src/livox_interfaces/
+*.pcd
