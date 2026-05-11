@@ -1,8 +1,9 @@
 # FAST-LIO2 config dla Unitree G1 + Livox Mid-360 + IMU.
-# Skopiowany 1:1 z kursu AI/RL G1, lekcja L33 (Fast-LIO).
-# Wartości IMU noise są specyficznie tunowane pod G1 — bardzo niski
-# gyro covariance + ekstremalnie niski gyro bias żeby zapobiec drift
-# w długich sesjach.
+# Wartości IMU noise tunowane pod G1 — bardzo niski gyro covariance +
+# ekstremalnie niski gyro bias żeby zapobiec drift w długich sesjach.
+# Punkt startu: default mid360.yaml z FAST_LIO_ROS2 (Ericsii). Tuning
+# IMU noise pod konkretną platformę G1 — patrz docs/fast_lio_setup.md
+# (sekcja "FAST-LIO traci track po kilku metrach").
 /**:
     ros__parameters:
         feature_extract_enable: false

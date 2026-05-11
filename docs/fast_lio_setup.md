@@ -11,51 +11,89 @@ podczas testu, nie razem.
 ## Wymagania
 
 - Realny G1 z Livox Mid-360 + IMU
-- Unitree firmware publikujący chmurę i IMU (sprawdź topiki niżej)
-- ROS2 Humble + nasza workspace `g1_courier_ws` zbudowana
+- Ubuntu 22.04 + ROS2 Humble (potwierdzone wsparcie dla Livox driver2 + FAST-LIO_ROS2)
+- Nasza workspace `g1_courier_ws` zbudowana (`g1_courier_fastlio` pakiet)
 
 ## Instalacja zależności (jednorazowo)
 
-FAST-LIO2 nie ma w `apt`. Trzeba sklonować ROS2 port:
+FAST-LIO2 dla ROS2 nie jest dostępne w `apt`. Plus trzeba uruchomić
+Livox driver. Klonujemy do `src/` i budujemy z workspace.
+
+### 1. apt deps
+
+```bash
+sudo apt install -y libpcl-dev libeigen3-dev
+```
+
+### 2. Livox ROS2 Driver (Mid-360)
+
+**Repo**: <https://github.com/Livox-SDK/livox_ros_driver2>
+(oficjalne Livox SDK, ROS2 Humble + Jazzy + Foxy support)
 
 ```bash
 cd ~/g1_courier_ws/src
+git clone https://github.com/Livox-SDK/livox_ros_driver2
 
-# FAST-LIO ROS2 wrapper
-git clone https://github.com/Ericsii/fast_lio_ros2 fast_lio_ros2
-# Plus Livox driver z interfaces (FAST-LIO wymaga livox_interfaces)
-git clone https://github.com/Livox-SDK/livox_ros_driver2 livox_ros_driver2
+# Livox driver wymaga osobnego build script (nie standardowy colcon):
+cd livox_ros_driver2
+source /opt/ros/humble/setup.bash
+./build.sh humble
+# Tworzy install/ wewnątrz livox_ros_driver2/. Plus build.sh symlinkuje wynik
+# do parent workspace install/.
+```
+
+> Argument `humble` jest **wymagany** — bez niego skrypt nie wie który ROS2.
+> Dla Jazzy: `./build.sh jazzy`. Dla Foxy: `./build.sh ROS2`.
+
+### 3. FAST-LIO2 dla ROS2
+
+**Repo**: <https://github.com/Ericsii/FAST_LIO_ROS2>
+(aktywnie utrzymywany port ROS2, 570⭐, branch `ros2` jako default)
+
+```bash
+cd ~/g1_courier_ws/src
+git clone --recursive https://github.com/Ericsii/FAST_LIO_ROS2
+
+# Plus rozwiąż zależności:
+cd ~/g1_courier_ws
+rosdep install --from-paths src --ignore-src -y
 
 # Build:
-cd ~/g1_courier_ws
-colcon build --packages-select livox_interfaces livox_ros_driver2 fast_lio g1_courier_fastlio
+colcon build --symlink-install --packages-select fast_lio livox_interfaces g1_courier_fastlio
 source install/setup.bash
 ```
 
-> Alternatywne źródło: kurs AI/RL G1 (lekcja L33) używa
-> `~/git-repo/fast_lio_ros2`. Jeśli masz dostęp, możesz użyć tamtejszego
-> forka który jest tunowany pod G1. Plus `g1_theconstruct_navigation_stack`
-> z TheConstruct ma więcej pakietów pomocniczych (pcd_to_pgm,
-> open3d_global_localization). Patrz L33 docs w kursie.
+> Flaga `--recursive` jest **wymagana** przy clone — FAST_LIO_ROS2 ma submoduły
+> (m.in. `ikd-Tree`). Bez `--recursive` build failuje na missing header.
 
-## Sprawdź topiki
+### 4. Weryfikacja
 
 ```bash
-# z chodzącym Unitree firmware:
-ros2 topic list | grep -E 'livox|utlidar|imu'
-# spodziewane:
-#   /livox/lidar       (PointCloud2)
-#   /livox/imu         (Imu)
-# albo:
-#   /utlidar/cloud_livox_360mid
-#   /utlidar/imu
+ros2 pkg prefix fast_lio
+# spodziewane: /home/parallels/g1_courier_ws/install/fast_lio
 
-ros2 topic hz /livox/lidar    # ~10 Hz
-ros2 topic hz /livox/imu      # ~200 Hz (lub wyżej)
+ros2 pkg prefix livox_ros_driver2
+# spodziewane: ...
+
+ros2 pkg executables fast_lio
+# spodziewane: fast_lio fastlio_mapping
 ```
 
-Jeśli twoje topiki są pod inną nazwą (np. `/utlidar/...`), edytuj
-`config/g1_mid360.yaml`:
+Wszystkie trzy komendy muszą zwrócić sensowny output. Jeśli któraś
+"Package not found" — wróć do build z `colcon build`.
+
+## Konfiguracja Livox driver dla Mid-360
+
+Livox publikuje na configurable topikach. Domyślny `msg_MID360_launch.py`
+z `livox_ros_driver2` używa configów z `~/g1_courier_ws/src/livox_ros_driver2/config/MID360_config.json`. Sprawdź który IP ma twój Mid-360
+i dostosuj plik configu jeśli inny niż domyślny `192.168.1.1xx`.
+
+Po uruchomieniu Livox driver publikuje:
+- `/livox/lidar` (sensor_msgs/PointCloud2) — chmura ~10 Hz
+- `/livox/imu` (sensor_msgs/Imu) — ~200 Hz, time-synced z lidar hardware'owo
+
+Jeśli twój setup używa innych nazw (np. firmware Unitree publikuje pod
+`/utlidar/cloud_livox_360mid` + `/utlidar/imu`), edytuj `config/g1_mid360.yaml`:
 ```yaml
 common:
     lid_topic:  "/utlidar/cloud_livox_360mid"
@@ -65,49 +103,59 @@ common:
 ## Uruchomienie mapowania
 
 ```bash
-# Terminal 1 — FAST-LIO + RViz preset:
-ros2 launch g1_courier_fastlio fastlio_mapping.launch.py
+# Terminal 1 — odpal Livox driver (jeśli nie chodzi już Unitree firmware):
+ros2 launch livox_ros_driver2 msg_MID360_launch.py
 
-# Czekaj ~5-10 s. W RViz Fixed Frame: camera_init.
-# Spodziewane: /cloud_registered z punktami akumulującymi się.
-# Plus /Odometry publikuje świeże dane (~10 Hz).
+# Sprawdź że topiki publikują:
+ros2 topic hz /livox/lidar    # ~10 Hz
+ros2 topic hz /livox/imu      # ~200 Hz
 ```
 
 ```bash
-# Terminal 2 — teleop manualny:
+# Terminal 2 — FAST-LIO mapping z naszym configiem:
+ros2 launch g1_courier_fastlio fastlio_mapping.launch.py
+```
+
+W RViz Fixed Frame ustaw na `camera_init` (FAST-LIO publikuje TF od
+tej ramki). Spodziewane: `/cloud_registered` punkty akumulują się,
+`/Odometry` publikuje świeże dane ~10 Hz.
+
+```bash
+# Terminal 3 — teleop, jeźdź bardzo wolno:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
-# WAŻNE: spowolnij maksymalnie — FAST-LIO traci track przy szybkim ruchu.
-# Naciskaj `e` żeby zmniejszyć linear speed do 0.10.
-# Naciskaj `x` żeby zmniejszyć angular speed do 0.10.
+# WAŻNE: spowolnij do max 0.1 m/s. FAST-LIO traci track przy szybkim
+# ruchu (zbieżność iEKF wymaga małej delta pose między klatkami).
+# Naciskaj `e` aż linear speed = 0.10
+# Naciskaj `x` aż angular speed = 0.10
 ```
 
 Przejedź całą scenę powoli — front każdego biurka, każdy korytarz.
 FAST-LIO buduje mapę "na żywo" w RViz.
 
-## Zapisz mapę
+## Zapis mapy
 
 ```bash
-# Terminal 3 — gdy mapa wygląda kompletnie (NIE Ctrl+C launchu jeszcze):
+# Terminal 4 — gdy mapa wygląda kompletnie (NIE Ctrl+C launchu jeszcze):
 ros2 service call /map_save std_srvs/srv/Trigger {}
 # Spodziewane: response success=True
 ```
 
-Plik `g1_map.pcd` zapisany w katalogu z którego uruchomiłeś launch
-(`~/g1_courier_ws/` zwykle).
+Plik `scans.pcd` zapisany w `~/.ros/` lub w cwd skąd uruchomiłeś launch.
+Sprawdź dokładną ścieżkę w logu nodu — FAST-LIO loguje "Saved map to ...".
 
 ## Obejrzenie mapy 3D
 
 ```bash
-pip install "numpy==1.26.4" "open3d>=0.17,<0.19"
+pip install "open3d>=0.17,<0.19" "numpy==1.26.4"
 python3 -c "
 import open3d as o3d
-pcd = o3d.io.read_point_cloud('g1_map.pcd')
+pcd = o3d.io.read_point_cloud('scans.pcd')
 print(f'{len(pcd.points)} pkt')
 o3d.visualization.draw_geometries([pcd])
 "
 ```
 
-Plus kurs ma dedicated viewer: `python3 pcd_viewer.py g1_map.pcd`.
+Plus alternatywa CLI: `pcl_viewer scans.pcd` (z `apt install pcl-tools`).
 
 ## Konwersja 3D PCD → 2D PGM (do nav2)
 
@@ -120,7 +168,7 @@ pip install "open3d>=0.17,<0.19" "numpy==1.26.4" pillow
 
 # Konwersja:
 mkdir -p ~/maps
-python3 ~/g1_courier_ws/tools/fastlio_pcd_to_pgm.py g1_map.pcd \
+python3 ~/g1_courier_ws/tools/fastlio_pcd_to_pgm.py scans.pcd \
     --out-dir ~/maps \
     --name lab_fastlio \
     --resolution 0.05 \
@@ -130,7 +178,7 @@ python3 ~/g1_courier_ws/tools/fastlio_pcd_to_pgm.py g1_map.pcd \
 
 Tworzy:
 - `~/maps/lab_fastlio.pgm` (obraz mapy 2D)
-- `~/maps/lab_fastlio.yaml` (metadane: origin, resolution, thresholds)
+- `~/maps/lab_fastlio.yaml` (metadane nav2: origin, resolution, thresholds)
 
 Parametry:
 - `--z-min -0.4` — wszystko poniżej (podłoga, kable) wycięte
@@ -162,7 +210,7 @@ loop closure: użyj FAST-LIO **tylko jako odometry source**.
 - slam_toolbox nadal mapuje + ma loop closure
 - AMCL nadal lokalizuje w 2D
 
-To wymaga adaptacji `odom_tf_relay` (dziś czyta `/dog_odom` od Tomasza,
+To wymaga adaptacji `odom_tf_relay` (dziś czyta `/dog_odom` od firmware,
 można skierować na `/Odometry`). ~1-godzinna zmiana. Daj znać jeśli
 chcesz tę ścieżkę.
 
@@ -170,50 +218,62 @@ chcesz tę ścieżkę.
 
 | Aspekt | slam_toolbox (nasze) | FAST-LIO2 (test) |
 |---|---|---|
-| Mapa 2D PGM | ~/maps/lab_slam.pgm | konwersja z lab_fastlio.pgm |
-| Odom źródło | /dog_odom (firmware) | /Odometry (FAST-LIO z IMU coupling) |
-| Loop closure | tak (Ceres) | nie natywnie |
+| Mapa 2D PGM | `~/maps/lab.yaml` | konwersja `tools/fastlio_pcd_to_pgm.py` → `~/maps/lab_fastlio.yaml` |
+| Odom źródło | `/dog_odom` (firmware) | `/Odometry` (FAST-LIO z IMU coupling) |
+| Loop closure | tak (Ceres pose graph) | nie natywnie |
 | 3D info | brak | tak (PCD) |
 | CPU | ~10% | ~25% |
-| Czas mapowania | ~2 min walking | ~15 min wolny walking |
+| Czas mapowania typowego labu | ~2 min walking | ~15 min wolny walking (max 0.1 m/s) |
 
 Sprawdź:
-1. Wyrazistość konturów ścian (FAST-LIO zwykle lepsze)
+1. Wyrazistość konturów ścian (FAST-LIO zwykle lepsze przez IMU coupling)
 2. Dryf po zamknięciu pętli (slam_toolbox lepszy dzięki loop closure)
-3. Fragmentaryczność (FAST-LIO + IMU stable)
+3. Fragmentaryczność mapy (FAST-LIO + IMU stable)
 4. Liczba dziur w nieuporządkowanym labie
-
-## Co dalej jeśli FAST-LIO wygrywa
-
-Jeśli FAST-LIO daje znacznie lepsze mapy:
-
-**Opcja minimalna**: trzymaj FAST-LIO **tylko jako odometry replacement**.
-Zastąp `odom_tf_relay` (Tomasz, z `/dog_odom`) → `odom_tf_relay`
-z `/Odometry` (FAST-LIO). Slam_toolbox nadal mapuje 2D, ale dostaje
-lepszy odom feedback. ~1 dzień pracy.
-
-**Opcja pełna**: migracja do open3d_global_localization (replacement
-AMCL) + pełen stack FAST-LIO mapping. Patrz kurs L33-L37. ~2-3 dni.
 
 ## Troubleshooting
 
 ### FAST-LIO dropuje wszystkie chmury, mapa pusta
 
-Logi pokazują `Failed to extract scan_msg`. Sprawdź:
-- `lidar_type` w configu — 4 dla generic PointCloud2, 1 dla Livox proprietary
-- czy `/livox/lidar` faktycznie publikuje PointCloud2 (`ros2 topic info`)
+W logu `[fast_lio]: No new scan` albo `Failed to extract scan_msg`.
+Sprawdź:
+- `lidar_type` w configu `g1_mid360.yaml` — `4` dla generic PointCloud2,
+  `1` dla Livox proprietary CustomMsg (gdy używasz `xfer_format: 1` w livox driver)
+- czy `/livox/lidar` faktycznie publikuje:
+  ```bash
+  ros2 topic info /livox/lidar --verbose
+  ros2 topic hz /livox/lidar
+  ```
 
-### `tf` warnings camera_init nie istnieje
+### FAST-LIO traci track po kilku metrach
+
+- Robot porusza się za szybko — zmniejsz teleop do `vx=0.05`, `wz=0.05`
+- IMU bias za duży — w `g1_mid360.yaml` ustaw `extrinsic_est_en: true`
+  na pierwszej sesji żeby auto-calibrate; wyłącz po skalibrowaniu
+- Sprawdź czy `gyr_cov` i `b_gyr_cov` w configu nie są za niskie dla
+  twojego IMU (Mid-360 wbudowany ma typowo `gyr_cov: 0.001`,
+  `b_gyr_cov: 1e-7`)
+
+### `tf` warnings: `camera_init` nie istnieje
 
 FAST-LIO publikuje `camera_init → body` TF. Plus reszta naszego stacka
-oczekuje `odom → base_link`. Dla **standalone testu** nie jest to problem
-(FAST-LIO + RViz wystarcza). Plus dla integracji z nav2 — potrzebne
-mostek static_transform_publisher (patrz `global_localization_g1.launch.py`
-w kursie).
+oczekuje `odom → base_link`. Dla **standalone testu mapping** nie jest
+to problem (FAST-LIO + RViz wystarcza, Fixed Frame `camera_init`). Plus
+dla integracji z nav2 — potrzebne static_transform_publisher mostek
+(`odom → camera_init` identity).
 
-### Mapa drift po zamknięciu pętli
+### `livox_ros_driver2` nie buduje się przez colcon
 
-FAST-LIO nie ma natywnego loop closure. Bug nie błąd. Albo:
-- Akceptuj jako trade-off za lepszą local accuracy
-- Użyj `open3d_global_localization` z kursu jako post-processing
-- Migruj do `LIO-SAM` (alternatywa z loop closure, ale cięższa)
+Driver Livox **nie używa standardowego colcon** — wymaga `./build.sh humble`.
+Jeśli próbujesz `colcon build --packages-select livox_ros_driver2` to
+może failować. Zawsze build przez `./build.sh humble` z katalogu pakietu.
+
+### Mapa drift po zamknięciu pętli (np. wracając do startu)
+
+FAST-LIO nie ma natywnego loop closure. To znana limitation, nie bug.
+Akceptuj jako trade-off za lepszą local accuracy. Plus alternatywy:
+- Mapuj krótkimi sesjami (do 5 min) zamiast jedną długą
+- Po mapowaniu, edytuj `g1_map.pcd` ręcznie (otwórz w Open3D, wyrównaj
+  fragmenty, eksportuj)
+- Migracja do `LIO-SAM` (https://github.com/TixiaoShan/LIO-SAM) —
+  alternatywa z loop closure, ale cięższa CPU

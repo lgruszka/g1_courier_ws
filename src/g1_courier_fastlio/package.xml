@@ -6,9 +6,9 @@
     Standalone FAST-LIO2 mapping/localization for G1 + Livox Mid-360.
     Alternatywne podejście do slam_toolbox: LiDAR-Inertial Odometry z
     Mid-360 + IMU coupling. Output: 3D point cloud map (.pcd) + low-drift
-    /Odometry. Pakiet zawiera launch + config wykalibrowany pod G1 (per
-    L33_Fast-LIO.md z kursu AI/RL G1). Wymaga external clone'a
-    fast_lio_ros2 do src/ — patrz docs/fast_lio_setup.md.
+    /Odometry. Pakiet zawiera launch + config wykalibrowany pod G1 + IMU
+    Mid-360. Wymaga external clone'a Ericsii/FAST_LIO_ROS2 +
+    Livox-SDK/livox_ros_driver2 do src/ — patrz docs/fast_lio_setup.md.
   </description>
   <maintainer email="lukasz.gruszka90@gmail.com">Lukasz Gruszka</maintainer>
   <license>Apache-2.0</license>
