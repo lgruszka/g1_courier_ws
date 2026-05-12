@@ -121,7 +121,7 @@ class UnitreeCmdVelBridgeNode(Node):
             f'Bridge online: {self.cmd_vel_topic} -> {self.unitree_request_topic}, rate={publish_rate}Hz'
         )
 
-        self._send_startup_sequence()
+        #self._send_startup_sequence()
 
     def _publish_api(self, api_id: int, payload: dict | None, tag: str) -> int:
         """
