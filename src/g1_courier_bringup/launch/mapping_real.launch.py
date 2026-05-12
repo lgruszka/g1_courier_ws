@@ -61,11 +61,11 @@ def generate_launch_description() -> LaunchDescription:
                     'without RSP — only model viz disappears).',
     )
     cloud_topic_arg = DeclareLaunchArgument(
-        'cloud_topic', default_value='/utlidar/cloud_livox_360mid',
+        'cloud_topic', default_value='/livox/lidar',
         description='PointCloud2 source topic (Unitree firmware default).',
     )
     lidar_frame_arg = DeclareLaunchArgument(
-        'lidar_frame_id', default_value='utlidar_lidar',
+        'lidar_frame_id', default_value='livox_frame',
         description='frame_id stamped on lidar messages by Unitree firmware. '
                     'Verify with: ros2 topic echo <cloud_topic> --field header.frame_id --once',
     )

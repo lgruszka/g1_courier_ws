@@ -13,7 +13,7 @@ This launch assumes the Unitree firmware-side bridges are already running:
   - sport API consumer of /cmd_vel (firmware side, proprietary)
   - /lowstate publisher and /arm_sdk subscriber (firmware DDS bridge)
   - Livox PointCloud2 published by Unitree firmware (default
-    /utlidar/cloud_livox_360mid; override via launch arg cloud_topic)
+    /utlidar/cloud_livox_mid360; override via launch arg cloud_topic)
   - RealSense D435i driver publishing /camera/color/image_raw + /camera/color/camera_info
 
 This launch wires the missing TF pieces that the firmware does not
@@ -96,9 +96,9 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('enable_robot_model', default_value='true',
             description='Start robot_state_publisher + lowstate_to_joint_states '
                         'for TF and RViz RobotModel. Set false for headless/minimal runs.'),
-        DeclareLaunchArgument('cloud_topic', default_value='/utlidar/cloud_livox_360mid',
+        DeclareLaunchArgument('cloud_topic', default_value='/livox/lidar',
             description='PointCloud2 source topic (Unitree firmware default).'),
-        DeclareLaunchArgument('lidar_frame_id', default_value='utlidar_lidar',
+        DeclareLaunchArgument('lidar_frame_id', default_value='livox_frame',
             description='frame_id stamped by Unitree firmware on lidar messages.'),
 
         # robot_state_publisher: TF from base_link to every URDF link.
