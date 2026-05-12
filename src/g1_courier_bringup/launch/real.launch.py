@@ -100,6 +100,9 @@ def generate_launch_description() -> LaunchDescription:
             description='PointCloud2 source topic (Unitree firmware default).'),
         DeclareLaunchArgument('lidar_frame_id', default_value='livox_frame',
             description='frame_id stamped by Unitree firmware on lidar messages.'),
+        DeclareLaunchArgument('enable_mission', default_value='true',
+            description='Start mission_node (BT). Set false for nav-only smoke '
+                        'tests where you send manual goals from RViz.'),
 
         # robot_state_publisher: TF from base_link to every URDF link.
         # Gated on enable_robot_model — set false if URDF missing.
@@ -235,7 +238,10 @@ def generate_launch_description() -> LaunchDescription:
              name='retreat_action_server',
              parameters=[os.path.join(mission_share, 'config', 'mission.yaml')]),
 
-        # Mission orchestrator (Behavior Tree).
+        # Mission orchestrator (Behavior Tree). Gated by enable_mission so
+        # nav-only smoke tests can skip auto-goal injection and let the
+        # operator drive from RViz 2D Goal Pose instead.
         Node(package='g1_courier_mission', executable='mission_node', name='mission_node',
-             parameters=[os.path.join(mission_share, 'config', 'mission.yaml')]),
+             parameters=[os.path.join(mission_share, 'config', 'mission.yaml')],
+             condition=IfCondition(LaunchConfiguration('enable_mission'))),
     ])
