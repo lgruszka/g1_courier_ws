@@ -21,6 +21,7 @@ docs/fast_lio_setup.md. Streszczenie:
 
   git clone --recursive https://github.com/Ericsii/FAST_LIO_ROS2 src/FAST_LIO_ROS2
   git clone https://github.com/Livox-SDK/livox_ros_driver2 src/livox_ros_driver2
+  sudo apt install ros-humble-pcl-ros ros-humble-pcl-conversions ros-humble-pcl-msgs
   cd src/livox_ros_driver2 && ./build.sh humble && cd ../..
   rosdep install --from-paths src --ignore-src -y
   colcon build --packages-select fast_lio livox_interfaces g1_courier_fastlio
@@ -29,6 +30,10 @@ docs/fast_lio_setup.md. Streszczenie:
 Plus assumption: Livox driver publikuje na /livox/lidar + /livox/imu.
 Jeśli twoje topiki to /utlidar/cloud_livox_360mid + /utlidar/imu,
 edytuj `config/g1_mid360.yaml` (klucz `common.lid_topic` / `imu_topic`).
+
+Uruchomienie lidaru z drivera
+ros2 launch livox_ros_driver2 msg_MID360_launch.py
+Nalezy zedytowac wczesniej MID360_config.json i ustawic IP lidaru
 
 Uruchomienie:
   ros2 launch g1_courier_fastlio fastlio_mapping.launch.py
