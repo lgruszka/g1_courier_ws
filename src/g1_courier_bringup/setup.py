@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'odom_tf_relay = g1_courier_bringup.odom_tf_relay:main',
+            'd435i_node = g1_courier_bringup.d435i_node:main',
         ],
     },
 )

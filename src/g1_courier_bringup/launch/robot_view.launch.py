@@ -18,11 +18,17 @@ TF tree po starcie:
 Fixed Frame w RViz: `base_link` (robot jest "kotwicą", świat się rusza).
 
 Uruchomienie:
+  # sam model robota + RViz (default — bez LiDAR-a, bez kamery):
   ros2 launch g1_courier_bringup robot_view.launch.py
-  # bez RViz (headless):
+  # plus LiDAR (Mid-360 → /scan, static TF, display LaserScan w RViz):
+  ros2 launch g1_courier_bringup robot_view.launch.py enable_lidar:=true
+  # plus kamera (D435i → /camera/image_raw + /camera/depth/...):
+  ros2 launch g1_courier_bringup robot_view.launch.py enable_camera:=true
+  # wszystko naraz:
+  ros2 launch g1_courier_bringup robot_view.launch.py \
+    enable_lidar:=true enable_camera:=true
+  # headless (bez RViz):
   ros2 launch g1_courier_bringup robot_view.launch.py enable_rviz:=false
-  # bez LiDAR (sam model + TF):
-  ros2 launch g1_courier_bringup robot_view.launch.py enable_lidar:=false
 """
 from __future__ import annotations
 
@@ -57,8 +63,13 @@ def generate_launch_description() -> LaunchDescription:
             description='RViz config — domyślny robot_view.rviz w bringup/rviz/.'),
         DeclareLaunchArgument('enable_rviz', default_value='true',
             description='Odpal RViz. False = headless (tylko TF + joint_states).'),
-        DeclareLaunchArgument('enable_lidar', default_value='true',
-            description='Odpal pointcloud_to_laserscan + static TF base_link→lidar.'),
+        DeclareLaunchArgument('enable_lidar', default_value='false',
+            description='Odpal pointcloud_to_laserscan + static TF base_link→lidar. '
+                        'Default false — sam model robota. Set true żeby zobaczyć '
+                        '/scan w RViz.'),
+        DeclareLaunchArgument('enable_camera', default_value='false',
+            description='Odpal d435i_node (RealSense D435i RGB+depth) plus pokaż '
+                        '/camera/image_raw w RViz Image display. Default false.'),
         DeclareLaunchArgument('cloud_topic', default_value='/livox/lidar',
             description='PointCloud2 source topic (livox_ros_driver2 default).'),
         DeclareLaunchArgument('lidar_frame_id', default_value='livox_frame',
@@ -111,6 +122,16 @@ def generate_launch_description() -> LaunchDescription:
             remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
                         ('scan', '/scan')],
             condition=IfCondition(LaunchConfiguration('enable_lidar')),
+        ),
+
+        # RealSense D435i — kolor + depth. Domyślnie wyłączone, włącz
+        # `enable_camera:=true`. Wymaga pyrealsense2 + opencv-python.
+        Node(
+            package='g1_courier_bringup',
+            executable='d435i_node',
+            name='d435i_node',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('enable_camera')),
         ),
 
         # RViz z presetem robot_view.rviz.
