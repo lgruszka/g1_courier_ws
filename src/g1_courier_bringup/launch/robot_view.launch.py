@@ -92,6 +92,18 @@ def generate_launch_description() -> LaunchDescription:
             name='lowstate_to_joint_states',
         ),
 
+        # Static TF base_link → pelvis (identity). URDF root to `pelvis`,
+        # ale Fixed Frame w RViz to `base_link` — bez tego mostka RViz
+        # nie potrafi rozwinąć drzewa URDF (każdy link rzuca "No transform
+        # from <link> to base_link"). Identity bo na G1 base_link ≡ pelvis.
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_pelvis_tf',
+            arguments=['0', '0', '0', '0', '0', '0', '1',
+                       'base_link', 'pelvis'],
+        ),
+
         # Static TF base_link → lidar frame. Mid-360 ~1.45 m nad pelvis
         # (głowa). MEASURE FIZYCZNIE i override przez lidar_frame_id +
         # static_tf params jeśli twój mount jest inny.

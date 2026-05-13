@@ -123,6 +123,21 @@ def generate_launch_description() -> LaunchDescription:
             condition=IfCondition(LaunchConfiguration('enable_robot_model')),
         ),
 
+        # Static TF base_link -> pelvis (identity). URDF root is `pelvis`,
+        # but the rest of the stack (nav2, AMCL, costmaps, odom_tf_relay)
+        # uses `base_link` as the robot frame. Without this bridge, RViz
+        # RobotModel fails with "No transform from <link> to base_link" for
+        # every URDF body link. Identity on G1 — pelvis is geometrically
+        # base_link.
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_pelvis_tf',
+            arguments=['0', '0', '0', '0', '0', '0', '1',
+                       'base_link', 'pelvis'],
+            condition=IfCondition(LaunchConfiguration('enable_robot_model')),
+        ),
+
         # Static TF base_link -> lidar frame. Unitree firmware does NOT
         # publish this. Default assumes Mid-360 on G1 head ~1.45 m above
         # pelvis. MEASURE PHYSICALLY and override if wrong.
