@@ -24,9 +24,12 @@ Uruchomienie:
   ros2 launch g1_courier_bringup robot_view.launch.py enable_lidar:=true
   # plus kamera (D435i → /camera/image_raw + /camera/depth/...):
   ros2 launch g1_courier_bringup robot_view.launch.py enable_camera:=true
+  # plus odom (robot porusza się po RViz zamiast dreptać w miejscu;
+  # wymaga /dog_odom z firmware Unitree):
+  ros2 launch g1_courier_bringup robot_view.launch.py enable_odom:=true
   # wszystko naraz:
   ros2 launch g1_courier_bringup robot_view.launch.py \
-    enable_lidar:=true enable_camera:=true
+    enable_lidar:=true enable_camera:=true enable_odom:=true
   # headless (bez RViz):
   ros2 launch g1_courier_bringup robot_view.launch.py enable_rviz:=false
 """
@@ -38,7 +41,9 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import Command, LaunchConfiguration
+from launch.substitutions import (
+    AndSubstitution, Command, LaunchConfiguration, NotSubstitution,
+)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -70,6 +75,14 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('enable_camera', default_value='false',
             description='Odpal d435i_node (RealSense D435i RGB+depth) plus pokaż '
                         '/camera/image_raw w RViz Image display. Default false.'),
+        DeclareLaunchArgument('enable_odom', default_value='false',
+            description='Odpal odom_tf_relay (/dog_odom → TF odom→base_link) plus '
+                        'zmień Fixed Frame w RViz na `odom`. Wtedy robot porusza '
+                        'się po przestrzeni RViz zamiast dreptać w miejscu. '
+                        'Default false — robot jako kotwica w (0,0,0).'),
+        DeclareLaunchArgument('odom_topic', default_value='/dog_odom',
+            description='Topic z nav_msgs/Odometry — firmware odom. Override '
+                        'np. na /Odometry jeśli używasz FAST-LIO.'),
         DeclareLaunchArgument('cloud_topic', default_value='/livox/lidar',
             description='PointCloud2 source topic (livox_ros_driver2 default).'),
         DeclareLaunchArgument('lidar_frame_id', default_value='livox_frame',
@@ -146,13 +159,46 @@ def generate_launch_description() -> LaunchDescription:
             condition=IfCondition(LaunchConfiguration('enable_camera')),
         ),
 
-        # RViz z presetem robot_view.rviz.
+        # odom_tf_relay — czyta nav_msgs/Odometry z firmware i publikuje
+        # TF odom→base_link. Bez tego robot stoi w (0,0,0) bo nic nie
+        # aktualizuje pozycji base_link względem zewnętrznego frame'u.
+        Node(
+            package='g1_courier_bringup',
+            executable='odom_tf_relay',
+            name='odom_tf_relay',
+            parameters=[{
+                'odom_topic': LaunchConfiguration('odom_topic'),
+                'odom_frame': 'odom',
+                'base_frame': 'base_link',
+                'use_msg_frame_ids': False,
+                'use_msg_stamp': True,
+            }],
+            condition=IfCondition(LaunchConfiguration('enable_odom')),
+        ),
+
+        # RViz — dwa warianty zależnie od enable_odom:
+        # - bez odom (default): Fixed Frame z preset (base_link), robot kotwica
+        # - z odom: -f odom override Fixed Frame, robot porusza się po RViz
         Node(
             package='rviz2',
             executable='rviz2',
             name='rviz2_robot_view',
             arguments=['-d', LaunchConfiguration('rviz_config')],
             output='screen',
-            condition=IfCondition(LaunchConfiguration('enable_rviz')),
+            condition=IfCondition(AndSubstitution(
+                LaunchConfiguration('enable_rviz'),
+                NotSubstitution(LaunchConfiguration('enable_odom')),
+            )),
+        ),
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2_robot_view',
+            arguments=['-d', LaunchConfiguration('rviz_config'), '-f', 'odom'],
+            output='screen',
+            condition=IfCondition(AndSubstitution(
+                LaunchConfiguration('enable_rviz'),
+                LaunchConfiguration('enable_odom'),
+            )),
         ),
     ])
