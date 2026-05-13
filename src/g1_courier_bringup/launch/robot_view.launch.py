@@ -117,9 +117,11 @@ def generate_launch_description() -> LaunchDescription:
                        'base_link', 'pelvis'],
         ),
 
-        # Static TF base_link → lidar frame. Mid-360 ~1.45 m nad pelvis
-        # (głowa). MEASURE FIZYCZNIE i override przez lidar_frame_id +
-        # static_tf params jeśli twój mount jest inny.
+        # Static TF base_link → lidar frame. Always-on — opisuje fizyczny
+        # montaż Mid-360 na głowie (~1.45 m nad pelvis), niezależnie od
+        # tego czy uruchamiamy pointcloud_to_laserscan. MEASURE FIZYCZNIE
+        # i override przez lidar_frame_id + static_tf params jeśli mount
+        # inny.
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
@@ -130,7 +132,6 @@ def generate_launch_description() -> LaunchDescription:
                 '--frame-id', 'base_link',
                 '--child-frame-id', LaunchConfiguration('lidar_frame_id'),
             ],
-            condition=IfCondition(LaunchConfiguration('enable_lidar')),
         ),
 
         # PointCloud2 → 2D LaserScan dla RViz (opcjonalne — 3D PointCloud2
