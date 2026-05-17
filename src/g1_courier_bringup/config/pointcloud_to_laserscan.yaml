@@ -1,10 +1,10 @@
 pointcloud_to_laserscan:
   ros__parameters:
-    target_frame: base_link        # frame the synthetic 2D scan is expressed in
-    transform_tolerance: 0.20
+    target_frame: livox_frame      # keep native frame; avoid runtime transform dependency in converter
+    transform_tolerance: 2.0
     queue_size: 40                 # absorb short TF jitter without dropping input clouds
-    min_height: 0.5               # filter floor
-    max_height: 0.75               # below shoulders so torso doesn't echo
+    min_height: -10.0              # keep full slice around lidar; narrow band can starve /scan
+    max_height: 10.0
     angle_min: -3.14159
     angle_max: 3.14159
     angle_increment: 0.0087        # 0.5 deg

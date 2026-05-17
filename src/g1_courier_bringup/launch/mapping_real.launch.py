@@ -215,7 +215,7 @@ def generate_launch_description() -> LaunchDescription:
             name='pointcloud_to_laserscan',
             parameters=[
                 os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
-                {'input_queue_size': 50},
+                {'queue_size': 50},
             ],
             remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
                         ('scan', '/scan')],

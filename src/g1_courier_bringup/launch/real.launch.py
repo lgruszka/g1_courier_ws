@@ -33,7 +33,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
@@ -98,11 +98,21 @@ def generate_launch_description() -> LaunchDescription:
                         'for TF and RViz RobotModel. Set false for headless/minimal runs.'),
         DeclareLaunchArgument('cloud_topic', default_value='/livox/lidar',
             description='PointCloud2 source topic (Unitree firmware default).'),
+        DeclareLaunchArgument(
+            'pointcloud_start_delay',
+            default_value='10.0',
+            description='Delay (s) before starting pointcloud_to_laserscan.',
+        ),
         DeclareLaunchArgument('lidar_frame_id', default_value='livox_frame',
             description='frame_id stamped by Unitree firmware on lidar messages.'),
         DeclareLaunchArgument('enable_mission', default_value='true',
             description='Start mission_node (BT). Set false for nav-only smoke '
                         'tests where you send manual goals from RViz.'),
+        DeclareLaunchArgument(
+            'nav2_start_delay',
+            default_value='1.0',
+            description='Delay (s) before starting Nav2 so odom->base TF and first sensor data are available.',
+        ),
 
         # robot_state_publisher: TF from base_link to every URDF link.
         # Gated on enable_robot_model — set false if URDF missing.
@@ -147,7 +157,7 @@ def generate_launch_description() -> LaunchDescription:
             name='static_tf_lidar',
             arguments=[
                 '--x', '0.0', '--y', '0.0', '--z', '1.45',
-                '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0',
+                '--roll', '3.14159', '--pitch', '0.0', '--yaw', '0.0',
                 '--frame-id', 'base_link',
                 '--child-frame-id', LaunchConfiguration('lidar_frame_id'),
             ],
@@ -156,17 +166,21 @@ def generate_launch_description() -> LaunchDescription:
         # Sensors -> 2D scan. Bumped input_queue_size from default 10 —
         # Livox publishes large clouds; default queue overruns under TF
         # lookup latency.
-        Node(
-            package='pointcloud_to_laserscan',
-            executable='pointcloud_to_laserscan_node',
-            name='pointcloud_to_laserscan',
-            parameters=[
-                os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
-                {'input_queue_size': 50},
-                {'target_frame': base_frame},
+        TimerAction(
+            period=LaunchConfiguration('pointcloud_start_delay'),
+            actions=[
+                Node(
+                    package='pointcloud_to_laserscan',
+                    executable='pointcloud_to_laserscan_node',
+                    name='pointcloud_to_laserscan',
+                    parameters=[
+                        os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
+                        {'queue_size': 50},
+                    ],
+                    remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
+                                ('scan', '/scan')],
+                ),
             ],
-            remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
-                        ('scan', '/scan')],
         ),
 
         Node(
@@ -179,7 +193,7 @@ def generate_launch_description() -> LaunchDescription:
                 'odom_frame': odom_frame,
                 'base_frame': base_frame,
                 'use_msg_frame_ids': False,
-                'use_msg_stamp': True,
+                'use_msg_stamp': False,
             }],
         ),
 
@@ -200,18 +214,23 @@ def generate_launch_description() -> LaunchDescription:
         # with dock + retreat. Required on Humble (where nav2 publishes
         # on /cmd_vel by default); no-op on Jazzy (nav2_bringup already
         # remaps internally there).
-        GroupAction([
-            SetRemap(src='/cmd_vel', dst='/cmd_vel_nav'),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(
-                    get_package_share_directory('nav2_bringup'), 'launch', 'bringup_launch.py')),
-                launch_arguments={
-                    'map': map_yaml,
-                    'use_sim_time': 'false',
-                    'params_file': nav2_params,
-                }.items(),
-            ),
-        ]),
+        TimerAction(
+            period=LaunchConfiguration('nav2_start_delay'),
+            actions=[
+                GroupAction([
+                    SetRemap(src='/cmd_vel', dst='/cmd_vel_nav'),
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(os.path.join(
+                            get_package_share_directory('nav2_bringup'), 'launch', 'bringup_launch.py')),
+                        launch_arguments={
+                            'map': map_yaml,
+                            'use_sim_time': 'false',
+                            'params_file': nav2_params,
+                        }.items(),
+                    ),
+                ]),
+            ],
+        ),
 
         # Safety / arbitration.
         Node(
