@@ -59,6 +59,14 @@ def main() -> int:
     parser.add_argument('--min-points-per-cell', type=int, default=2,
                         help='Cell occupied if >= N points (default: 2). '
                              'Higher = less noise but more holes.')
+    parser.add_argument('--flip-y', action='store_true',
+                        help='Mirror map along Y axis. Use gdy Mid-360 na G1 jest '
+                             'upside-down (FAST-LIO buduje chmurę w lustrzanym '
+                             'układzie). Sprawdź /livox/imu — gravity z=-9.81 → '
+                             'upside down.')
+    parser.add_argument('--flip-x', action='store_true',
+                        help='Mirror map along X axis. Rzadkie — przy nietypowym '
+                             'mountingu Mid-360.')
     args = parser.parse_args()
 
     if not os.path.isfile(args.pcd_path):
@@ -73,6 +81,16 @@ def main() -> int:
     pcd = o3d.io.read_point_cloud(args.pcd_path)
     pts = np.asarray(pcd.points)
     print(f'  {len(pts)} points')
+
+    # Mirror axis fix — Mid-360 mount orientation.
+    if args.flip_y:
+        pts = pts.copy()
+        pts[:, 1] = -pts[:, 1]
+        print('  applied --flip-y (Y axis mirrored)')
+    if args.flip_x:
+        pts = pts.copy()
+        pts[:, 0] = -pts[:, 0]
+        print('  applied --flip-x (X axis mirrored)')
 
     # Z slice — cut floor and ceiling.
     mask = (pts[:, 2] >= args.z_min) & (pts[:, 2] <= args.z_max)
