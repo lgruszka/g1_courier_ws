@@ -3,8 +3,8 @@ ros2 run pointcloud_to_laserscan pointcloud_to_laserscan_node --ros-args
 -r scan:=/scan     
 -p target_frame:=livox_frame     
 -p queue_size:=40     
--p min_height:=-5.0     
--p max_height:=5.0   
+-p min_height:=-30.0     
+-p max_height:=30.0   
  -p angle_min:=-3.14159     
  -p angle_max:=3.14159     
  -p angle_increment:=0.0087     

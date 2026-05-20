@@ -22,7 +22,7 @@
             time_offset_lidar_to_imu: 0.0
 
         preprocess:
-            lidar_type: 1                  # 1 = Livox CustomMsg (/livox/lidar)
+            lidar_type: 0                  # 1 = Livox CustomMsg (/livox/lidar)
             scan_line: 4
             blind: 0.5
             timestamp_unit: 3

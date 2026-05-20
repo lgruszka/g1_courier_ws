@@ -133,7 +133,7 @@ local_costmap:
       inflation_layer:
         plugin: 'nav2_costmap_2d::InflationLayer'
         cost_scaling_factor: 3.0
-        inflation_radius: 0.50       # safety margin around table A/B; map noise was
+        inflation_radius: 0.20       # safety margin around table A/B; map noise was
                                       # cleaned by connected-component filter (size<5
                                       # removed) so we can afford realistic inflation
       obstacle_layer:
