@@ -139,7 +139,8 @@ sleep 2
 
 # --- variant generation ---
 log "generuję warianty (pcd_variant_grid)..."
-TOOLS_DIR="$(dirname "$(readlink -f "$0")")"
+# WS_ROOT już policzone na początku PRZED `cd` — bezpieczne źródło ścieżki tools/
+TOOLS_DIR="$WS_ROOT/tools"
 FLIP_ARG=""
 [[ "$FLIP_Y" == "1" ]] && FLIP_ARG="--flip-y"
 python3 "$TOOLS_DIR/pcd_variant_grid.py" "$PCD_OUT" "$SCENARIOS_DIR" $FLIP_ARG
