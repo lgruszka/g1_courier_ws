@@ -1,26 +1,28 @@
 """Generuj wiele wariantów mapy z jednego PCD — do dobrania najlepszego slice + res.
 
-Multi-variant batch dla `fastlio_pcd_to_pgm.py`. Wypycha grid kombinacji:
-- Z-slice (wiele pasm wysokości)
-- resolution (kilka rozdzielczości)
-- min_points_per_cell (rzadko/gęsto wymagana zajętość komórki)
-- flip-y (mirror gdy Mid-360 jest upside-down na G1)
+Rozszerzony grid kombinacji (~30+ wariantów):
+- Z-slice (16 pasm wysokości)
+- 3 wartości resolution (0.025, 0.05, 0.10)
+- 3 wartości min_points_per_cell (1, 2, 4)
+- Flagowe kombinacje rozszerzone (resolution + density sweep)
 
-Wyniki w osobnych podfolderach żeby łatwo porównać w viewer obrazów.
+Wyniki w jednym folderze, manifest.json z metadanymi.
 
-Bez open3d — parser PCD binary natywny (numpy). Plus szybki.
+Bez open3d — parser PCD binary natywny (numpy). Szybki, bez zależności C++.
 
 Usage:
-  python3 tools/pcd_variant_grid.py <input.pcd> <out_dir> [--flip-y]
+  python3 tools/pcd_variant_grid.py <input.pcd> <out_dir> [--flip-y] [--flip-x]
 
 Przykład:
-  python3 tools/pcd_variant_grid.py g1_map.pcd ~/maps/scenarios_g1_map_v2 --flip-y
+  python3 tools/pcd_variant_grid.py ~/.ros/scans.pcd ~/maps/scenarios --flip-y
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+from datetime import datetime
 
 import numpy as np
 from PIL import Image
@@ -116,6 +118,65 @@ def write_variant(out_dir: str, base: str, pgm, x0, y0, resolution: float):
         )
 
 
+def build_variants_grid() -> list[tuple]:
+    """Zwraca listę (name, z_min, z_max, resolution, min_pts, opis)."""
+    # Wąskie pasma 0.20-0.35 m wysokości — żeby uchwycić konkretne struktury.
+    narrow = [
+        ('thin_below_lidar',  -0.30, -0.10, 'punkty tuż nad lidarem (sufit jeśli upside-down mount)'),
+        ('thin_lidar_level',  -0.10,  0.10, 'pasmo wokół poziomu lidaru'),
+        ('thin_just_above',    0.10,  0.30, 'tuż pod lidarem (po flip-y dla upside-down)'),
+        ('thin_low_25',        0.25,  0.50, 'wąski niski pas'),
+        ('thin_mid_50',        0.50,  0.75, 'klasyczny Tomek-tested pasem biurek'),
+        ('thin_mid_60',        0.60,  0.80, '20cm pas wyższy biurek'),
+        ('thin_high_80',       0.80,  1.05, 'wyżej — siedziska / monitory'),
+    ]
+    # Szerokie pasma 0.5-1.5 m wysokości — ogólny "shape" sceny.
+    wide = [
+        ('wide_floor_band',   -0.50,  0.20, 'pas wokół sufitu (upside-down camera_init Z- to fizyczne up)'),
+        ('wide_low',           0.00,  0.50, 'low band'),
+        ('wide_desks',         0.30,  0.85, 'biurka + bases'),
+        ('wide_mid_full',      0.30,  1.20, 'biurka + dolne monitory'),
+        ('wide_high',          0.80,  1.60, 'górne meble + ściany'),
+        ('wide_full',         -0.50,  1.80, 'cały sensowny zakres (bez sufitu i pod podłogą)'),
+    ]
+    # Bardzo specyficzne dla Go2 (lidar niżej niż na G1, ~0.4 m offset).
+    go2_specific = [
+        ('go2_walls_only',     1.00,  1.80, 'tylko ściany — Go2 lidar widzi mniej geometrii niż G1'),
+        ('go2_floor_obstacles', 0.10,  0.45, 'nogi mebli + niskie obiekty z perspektywy Go2'),
+    ]
+
+    variants = []
+    # Wszystkie wariantów Z @ default res 0.05, min_pts 2
+    for name, z_min, z_max, comment in narrow + wide + go2_specific:
+        variants.append((name, z_min, z_max, 0.05, 2, comment))
+
+    # Resolution sweep na flagowym slice (desks_mid-like)
+    FLAG_ZMIN, FLAG_ZMAX = 0.30, 0.85
+    for res in (0.025, 0.05, 0.10):
+        variants.append((
+            f'flag_res{int(res*1000):03d}', FLAG_ZMIN, FLAG_ZMAX, res, 2,
+            f'flagowy slice 0.30-0.85 @ {res*100:.1f} cm/px'
+        ))
+
+    # Density sweep na flagowym slice
+    for mpts in (1, 2, 4, 8):
+        variants.append((
+            f'flag_density_m{mpts}', FLAG_ZMIN, FLAG_ZMAX, 0.05, mpts,
+            f'flagowy slice 0.30-0.85, min_pts={mpts} (większy = mniej szumu)'
+        ))
+
+    # Wide-net na podłogę (po flip-y dla upside-down)
+    for shift in (0.0, 0.2, 0.4):
+        zmin, zmax = 0.50 + shift, 0.90 + shift
+        variants.append((
+            f'sweep_shifted_z{zmin:.2f}',
+            zmin, zmax, 0.05, 2,
+            f'shift slice {shift:+.2f} m vs flag'
+        ))
+
+    return variants
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('pcd_path')
@@ -123,6 +184,7 @@ def main():
     parser.add_argument('--flip-y', action='store_true',
                         help='Mid-360 upside-down — mirror Y')
     parser.add_argument('--flip-x', action='store_true')
+    parser.add_argument('--quiet', action='store_true')
     args = parser.parse_args()
 
     if not os.path.isfile(args.pcd_path):
@@ -140,70 +202,68 @@ def main():
         pts[:, 0] = -pts[:, 0]
         print('  applied --flip-x')
 
-    z_min_g, z_max_g = pts[:, 2].min(), pts[:, 2].max()
+    z_min_g, z_max_g = float(pts[:, 2].min()), float(pts[:, 2].max())
     print(f'  X range: [{pts[:,0].min():.2f}, {pts[:,0].max():.2f}]')
     print(f'  Y range: [{pts[:,1].min():.2f}, {pts[:,1].max():.2f}]')
     print(f'  Z range: [{z_min_g:.2f}, {z_max_g:.2f}]')
 
-    # Z histogram (20 bins) — guidance dla wyboru slice.
-    edges = np.linspace(z_min_g, z_max_g, 21)
-    h, _ = np.histogram(pts[:, 2], bins=edges)
-    print('\n  Z histogram (jeden # ~ 2% gęstości):')
-    bar_max = max(int(h.max()), 1)
-    for i in range(len(h)):
-        bar = '#' * int(50 * h[i] / bar_max)
-        print(f'    [{edges[i]:+.2f} .. {edges[i+1]:+.2f}]  {h[i]:>7d}  {bar}')
+    if not args.quiet:
+        edges = np.linspace(z_min_g, z_max_g, 21)
+        h, _ = np.histogram(pts[:, 2], bins=edges)
+        print('\n  Z histogram (one # ≈ 2% gęstości):')
+        bar_max = max(int(h.max()), 1)
+        for i in range(len(h)):
+            bar = '#' * int(50 * h[i] / bar_max)
+            print(f'    [{edges[i]:+.2f} .. {edges[i+1]:+.2f}]  {h[i]:>7d}  {bar}')
 
     os.makedirs(args.out_dir, exist_ok=True)
-
-    # ─── Grid wariantów ───────────────────────────────────────────────
-    # Każdy wariant: (name, z_min, z_max, resolution, min_pts, opis)
-    #
-    # Idea:
-    # - 14 wariantów Z-slice (od podłogi po ~1.5 m)
-    # - 4 wariantów resolution (0.025, 0.05, 0.10) na wybranych slice
-    # - 3 wariantów min_pts (1, 2, 4) na flagowym slice "desks_mid"
-    variants = [
-        # ─── Z slice grid @ resolution 0.05 ───
-        ('floor_only',      -0.50, -0.20, 0.05, 2, 'sama podłoga / nogi mebli niskie'),
-        ('legs_low',        -0.40,  0.30, 0.05, 2, 'nogi stołów, krzeseł'),
-        ('legs_mid',         0.00,  0.50, 0.05, 2, 'foot+leg cross-section'),
-        ('desks_low',        0.30,  0.80, 0.05, 2, 'fronty biurek + krzesła'),
-        ('desks_mid',        0.50,  0.85, 0.05, 2, 'klasyczny p2ls slice (Tomek)'),
-        ('desks_mid_wide',   0.40,  0.95, 0.05, 2, 'szerszy biurka + monitor bases'),
-        ('desks_wide',       0.30,  1.10, 0.05, 2, 'biurka + dolne monitory'),
-        ('upper',            0.80,  1.50, 0.05, 2, 'monitory / ekrany'),
-        ('mid_high',         0.50,  1.50, 0.05, 2, 'biurka + górne obiekty'),
-        ('walls_only',       1.20,  2.00, 0.05, 2, 'głównie ściany / lampy'),
-        ('full_clear',      -0.40,  1.80, 0.05, 2, 'wszystko - podłoga & sufit'),
-        ('thin_05_075',      0.50,  0.75, 0.05, 2, 'wąski Tomek-tested'),
-        ('thin_06_080',      0.60,  0.80, 0.05, 2, 'wąski 20cm pas biurek wysoko'),
-        ('thin_015_140',     0.15,  1.40, 0.05, 2, 'szeroki alternatywa'),
-        # ─── Resolution sweep na flagowym desks_mid ───
-        ('desks_mid_res025', 0.50,  0.85, 0.025, 2, 'desks_mid @ 2.5cm (highres)'),
-        ('desks_mid_res100', 0.50,  0.85, 0.10, 2,  'desks_mid @ 10cm (lores)'),
-        # ─── min_points_per_cell sweep — sprawdz czystość vs dziury ───
-        ('desks_mid_dense',  0.50,  0.85, 0.05, 4, 'desks_mid wymaga 4 pkt/cell (mniej szumu)'),
-        ('desks_mid_loose',  0.50,  0.85, 0.05, 1, 'desks_mid wymaga 1 pkt/cell (więcej detalu)'),
-    ]
+    variants = build_variants_grid()
 
     print(f'\nGenerating {len(variants)} variants → {args.out_dir}/')
-    print('=' * 90)
+    print('=' * 100)
+    manifest = []
     for name, z_min, z_max, resolution, min_pts, comment in variants:
         pgm, x0, y0, n = rasterize(pts, z_min, z_max, resolution, min_pts)
         if pgm is None:
-            print(f'  {name:22s}  [{z_min:+.2f}..{z_max:+.2f}] r={resolution}  EMPTY')
+            print(f'  {name:24s}  [{z_min:+.2f}..{z_max:+.2f}] r={resolution}  EMPTY')
             continue
-        base = f'{name}_z{z_min:+.2f}_{z_max:+.2f}_r{resolution}'.replace('+', 'p').replace('-', 'm')
+        base = f'{name}_z{z_min:+.2f}_{z_max:+.2f}_r{resolution}_m{min_pts}'
+        base = base.replace('+', 'p').replace('-', 'm').replace('.', '')
+        # ostatecznie wracam do '.' dla resolution, łatwiejsze do zinterpretowania.
+        # Plus krótka nazwa — sam variant name + zakres czytelny:
+        safe_name = name.replace('+', 'p').replace('-', 'm')
+        base = f'{safe_name}_r{resolution}_m{min_pts}'
         write_variant(args.out_dir, base, pgm, x0, y0, resolution)
         rows, cols = pgm.shape
         occ = int((pgm == 0).sum())
-        print(f'  {name:22s}  [{z_min:+.2f}..{z_max:+.2f}] r={resolution} '
+        print(f'  {name:24s}  [{z_min:+.2f}..{z_max:+.2f}] r={resolution} '
               f'm={min_pts} → {cols:>4}×{rows:<4}px  {occ:>6} occ  ({comment})')
+        manifest.append({
+            'name': name, 'base': base,
+            'z_min': z_min, 'z_max': z_max,
+            'resolution': resolution, 'min_pts_per_cell': min_pts,
+            'comment': comment, 'cols': cols, 'rows': rows,
+            'occupied_cells': occ, 'source_points': n,
+            'pgm': f'{base}.pgm', 'yaml': f'{base}.yaml',
+        })
 
-    print('=' * 90)
-    print(f'\nBrowse {args.out_dir}/ — np. `eog *.pgm` lub `xdg-open {args.out_dir}/`')
-    print('Dla nav2: `ros2 launch g1_courier_bringup real.launch.py map:={out}/<name>.yaml`')
+    # Manifest JSON dla map_picker.py
+    manifest_path = os.path.join(args.out_dir, 'manifest.json')
+    with open(manifest_path, 'w') as f:
+        json.dump({
+            'source_pcd': os.path.abspath(args.pcd_path),
+            'flip_y': args.flip_y, 'flip_x': args.flip_x,
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+            'total_points': len(pts),
+            'x_range': [float(pts[:, 0].min()), float(pts[:, 0].max())],
+            'y_range': [float(pts[:, 1].min()), float(pts[:, 1].max())],
+            'z_range': [z_min_g, z_max_g],
+            'variants': manifest,
+        }, f, indent=2)
+
+    print('=' * 100)
+    print(f'\nManifest: {manifest_path}')
+    print(f'Browse: python3 tools/map_picker.py {args.out_dir}')
     return 0
 
 
