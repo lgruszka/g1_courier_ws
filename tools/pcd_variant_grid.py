@@ -118,8 +118,13 @@ def write_variant(out_dir: str, base: str, pgm, x0, y0, resolution: float):
         )
 
 
-def build_variants_grid() -> list[tuple]:
-    """Zwraca listę (name, z_min, z_max, resolution, min_pts, opis)."""
+def build_variants_grid(default_res: float = 0.05) -> list[tuple]:
+    """Zwraca listę (name, z_min, z_max, resolution, min_pts, opis).
+
+    `default_res` aplikowane do wszystkich narrow/wide/go2/density/shift wariantów.
+    Resolution sweep zawsze zawiera kilka stałych wartości żeby porównanie było
+    możliwe niezależnie od override.
+    """
     # Wąskie pasma 0.20-0.35 m wysokości — żeby uchwycić konkretne struktury.
     narrow = [
         ('thin_below_lidar',  -0.30, -0.10, 'punkty tuż nad lidarem (sufit jeśli upside-down mount)'),
@@ -146,31 +151,32 @@ def build_variants_grid() -> list[tuple]:
     ]
 
     variants = []
-    # Wszystkie wariantów Z @ default res 0.05, min_pts 2
+    # Wszystkie wariantów Z @ globalny default_res (CLI --resolution), min_pts 2
     for name, z_min, z_max, comment in narrow + wide + go2_specific:
-        variants.append((name, z_min, z_max, 0.05, 2, comment))
+        variants.append((name, z_min, z_max, default_res, 2, comment))
 
-    # Resolution sweep na flagowym slice (desks_mid-like)
+    # Resolution sweep na flagowym slice (desks_mid-like).
+    # Stałe wartości: 0.02 (bardzo drobne, mebla nogi widoczne), 0.025, 0.05 (standard), 0.10
     FLAG_ZMIN, FLAG_ZMAX = 0.30, 0.85
-    for res in (0.025, 0.05, 0.10):
+    for res in (0.02, 0.025, 0.05, 0.10):
         variants.append((
             f'flag_res{int(res*1000):03d}', FLAG_ZMIN, FLAG_ZMAX, res, 2,
             f'flagowy slice 0.30-0.85 @ {res*100:.1f} cm/px'
         ))
 
-    # Density sweep na flagowym slice
+    # Density sweep na flagowym slice — używa default_res
     for mpts in (1, 2, 4, 8):
         variants.append((
-            f'flag_density_m{mpts}', FLAG_ZMIN, FLAG_ZMAX, 0.05, mpts,
+            f'flag_density_m{mpts}', FLAG_ZMIN, FLAG_ZMAX, default_res, mpts,
             f'flagowy slice 0.30-0.85, min_pts={mpts} (większy = mniej szumu)'
         ))
 
-    # Wide-net na podłogę (po flip-y dla upside-down)
+    # Wide-net na podłogę (po flip-y dla upside-down) — używa default_res
     for shift in (0.0, 0.2, 0.4):
         zmin, zmax = 0.50 + shift, 0.90 + shift
         variants.append((
             f'sweep_shifted_z{zmin:.2f}',
-            zmin, zmax, 0.05, 2,
+            zmin, zmax, default_res, 2,
             f'shift slice {shift:+.2f} m vs flag'
         ))
 
@@ -184,8 +190,18 @@ def main():
     parser.add_argument('--flip-y', action='store_true',
                         help='Mid-360 upside-down — mirror Y')
     parser.add_argument('--flip-x', action='store_true')
+    parser.add_argument('--resolution', type=float, default=0.05,
+                        help='Globalny grid res w m/px dla wszystkich slice variants '
+                             '(default 0.05 = standard nav2). Użyj 0.02-0.03 jeśli '
+                             '/scan nie pasuje do mapy bo piksele za grube. Resolution '
+                             'sweep na flagowym slice zawsze ma 0.02/0.025/0.05/0.10 '
+                             'do porównania niezależnie od tego.')
     parser.add_argument('--quiet', action='store_true')
     args = parser.parse_args()
+
+    if args.resolution <= 0 or args.resolution > 1.0:
+        sys.stderr.write(f'--resolution {args.resolution} poza sensownym zakresem (0.005-1.0)\n')
+        return 1
 
     if not os.path.isfile(args.pcd_path):
         sys.stderr.write(f'PCD not found: {args.pcd_path}\n')
@@ -217,7 +233,8 @@ def main():
             print(f'    [{edges[i]:+.2f} .. {edges[i+1]:+.2f}]  {h[i]:>7d}  {bar}')
 
     os.makedirs(args.out_dir, exist_ok=True)
-    variants = build_variants_grid()
+    variants = build_variants_grid(default_res=args.resolution)
+    print(f'\n  default resolution: {args.resolution} m/px ({args.resolution*100:.1f} cm/px)')
 
     print(f'\nGenerating {len(variants)} variants → {args.out_dir}/')
     print('=' * 100)
