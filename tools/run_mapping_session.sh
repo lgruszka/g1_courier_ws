@@ -19,6 +19,7 @@ PCD_OUT="${PCD_OUT:-$HOME/maps/last_session.pcd}"
 SCENARIOS_DIR="${SCENARIOS_DIR:-$HOME/maps/scenarios_$(date +%Y%m%d_%H%M%S)}"
 FLIP_Y="${FLIP_Y:-1}"     # 1 = pass --flip-y (Mid-360 upside-down)
 KILL_DELAY="${KILL_DELAY:-3}"   # s po /map_save przed kill launchu
+FROM_PCD=""
 
 # --- helpers ---
 log() { printf '\033[1;36m[mapping_session]\033[0m %s\n' "$*"; }
@@ -38,6 +39,74 @@ cleanup() {
     pkill -9 -f 'fastlio_mapping' 2>/dev/null || true
     pkill -9 -f 'laserMapping' 2>/dev/null || true
 }
+
+usage() {
+    cat <<EOF
+Usage:
+  $(basename "$0") [--from-pcd /path/to/map.pcd] [--scenarios-dir /path/to/scenarios]
+
+Opcje:
+  --from-pcd       Użyj gotowego pliku PCD i pomiń etap mapowania (ROS/FAST-LIO).
+  --scenarios-dir  Katalog wyjściowy wariantów (domyślnie: $SCENARIOS_DIR).
+  -h, --help       Pokaż pomoc.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --from-pcd)
+            [[ $# -ge 2 ]] || { err "Brak wartości dla --from-pcd"; usage; exit 1; }
+            FROM_PCD="$2"
+            shift 2
+            ;;
+        --scenarios-dir)
+            [[ $# -ge 2 ]] || { err "Brak wartości dla --scenarios-dir"; usage; exit 1; }
+            SCENARIOS_DIR="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            err "Nieznana opcja: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+run_postprocess() {
+    local pcd_path="$1"
+    local scenarios_dir="$2"
+
+    if [[ ! -s "$pcd_path" ]]; then
+        err "PCD nie istnieje lub jest pusty: $pcd_path"
+        exit 1
+    fi
+
+    mkdir -p "$scenarios_dir"
+    log "PCD wejściowy: $pcd_path ($(du -h "$pcd_path" | cut -f1))"
+    log "Scenariusze: $scenarios_dir"
+
+    log "generuję warianty (pcd_variant_grid)..."
+    FLIP_ARG=""
+    [[ "$FLIP_Y" == "1" ]] && FLIP_ARG="--flip-y"
+    python3 "$SCRIPT_DIR/pcd_variant_grid.py" "$pcd_path" "$scenarios_dir" $FLIP_ARG
+
+    log "uruchamiam map picker..."
+    log "  W picker wybierz najlepszy wariant → 'Save as production map'"
+    log "  Mapa zostanie zapisana jako ~/maps/lab.yaml + lab.pgm"
+    log "  Potem: ros2 launch g1_courier_bringup real.launch.py map:=\$HOME/maps/lab.yaml"
+    python3 "$SCRIPT_DIR/map_picker.py" "$scenarios_dir" || true
+}
+
+if [[ -n "$FROM_PCD" ]]; then
+    log "tryb gotowego PCD — pomijam mapowanie i /map_save"
+    run_postprocess "$FROM_PCD" "$SCENARIOS_DIR"
+    log "session done — PCD: $FROM_PCD, scenarios: $SCENARIOS_DIR"
+    exit 0
+fi
 
 # --- pre-flight ---
 if ! command -v ros2 &>/dev/null; then
@@ -140,18 +209,6 @@ log "stopping FAST-LIO launch..."
 kill -INT $LAUNCH_PID 2>/dev/null || true
 sleep 2
 
-# --- variant generation ---
-log "generuję warianty (pcd_variant_grid)..."
-FLIP_ARG=""
-[[ "$FLIP_Y" == "1" ]] && FLIP_ARG="--flip-y"
-python3 "$SCRIPT_DIR/pcd_variant_grid.py" "$PCD_OUT" "$SCENARIOS_DIR" $FLIP_ARG
-
-# --- launch picker ---
-log "uruchamiam map picker..."
-log "  W picker wybierz najlepszy wariant → 'Save as production map'"
-log "  Mapa zostanie zapisana jako ~/maps/lab.yaml + lab.pgm"
-log "  Potem: ros2 launch g1_courier_bringup real.launch.py map:=\$HOME/maps/lab.yaml"
-
-python3 "$SCRIPT_DIR/map_picker.py" "$SCENARIOS_DIR" || true
+run_postprocess "$PCD_OUT" "$SCENARIOS_DIR"
 
 log "session done — PCD: $PCD_OUT, scenarios: $SCENARIOS_DIR"

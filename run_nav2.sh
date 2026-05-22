@@ -2,7 +2,7 @@
 set -euo pipefail
 
 STACK_TIMEOUT_S="${STACK_TIMEOUT_S:-45}"
-MAP_PATH="/home/neo/j2s/maps/wybrana_20260519/desks_mid_loose_20260519.yaml"
+MAP_PATH="../maps/lab.yaml"
 
 # Post-start quick check (manual):
 # 1) ros2 topic hz /livox/lidar

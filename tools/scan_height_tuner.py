@@ -10,7 +10,7 @@ Workflow:
 Plus optional auto-suggest: jeśli mapa załadowana w map_server, skrypt zaproponuje
 slice wartości na podstawie overlap heuristic.
 
-Wymaga: PyQt6 (sudo apt install python3-pyqt6).
+Wymaga: PyQt5 (sudo apt install python3-pyqt5).
 """
 from __future__ import annotations
 
@@ -25,9 +25,9 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer
+from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (
     QApplication, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
 )
@@ -39,11 +39,14 @@ MIN_VAL = -3.0
 MAX_VAL = 3.0
 STEP = 0.05
 
-# Default path do config yaml.
-DEFAULT_YAML = os.path.expanduser(
-    '~/g1_courier_ws/src/g1_courier_bringup/config/pointcloud_to_laserscan.yaml'
+# Default path do config yaml (wyliczany względem repo, nie nazwy workspace).
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+DEFAULT_YAML = os.path.join(
+    REPO_ROOT, 'src', 'g1_courier_bringup', 'config', 'pointcloud_to_laserscan.yaml'
 )
 DEFAULT_NODE_NAME = '/pointcloud_to_laserscan'
+DEFAULT_CLOUD_TOPIC = '/livox/lidar'
 
 
 class ScanWatcher(QObject):
@@ -93,6 +96,7 @@ class TunerWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle('pointcloud_to_laserscan — height tuner')
         self.resize(800, 500)
+        self._pcl_proc: Optional[subprocess.Popen] = None
 
         rclpy.init()
         self.node = rclpy.create_node('scan_height_tuner')
@@ -105,6 +109,10 @@ class TunerWindow(QMainWindow):
         self._executor_thread.start()
 
         self.node_name = DEFAULT_NODE_NAME
+        self._ensure_single_converter_running()
+        self._restart_timer = QTimer(self)
+        self._restart_timer.setSingleShot(True)
+        self._restart_timer.timeout.connect(self._restart_converter_with_current_values)
 
         # GUI.
         central = QWidget()
@@ -118,7 +126,7 @@ class TunerWindow(QMainWindow):
             'Patrz w RViz LaserScan display (`/scan`, Best Effort QoS). '
             'Gdy OK — klik <b>Save to yaml</b>.'
         )
-        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setTextFormat(Qt.RichText)
         info.setWordWrap(True)
         root.addWidget(info)
 
@@ -159,6 +167,9 @@ class TunerWindow(QMainWindow):
         self.lbl_status.setFont(QFont('Monospace'))
         self.lbl_status.setStyleSheet('background: #222; color: #cfc; padding: 8px;')
         root.addWidget(self.lbl_status)
+        self.lbl_publishers = QLabel('scan publishers: —')
+        self.lbl_publishers.setFont(QFont('Monospace'))
+        root.addWidget(self.lbl_publishers)
 
         # Action buttons.
         row = QHBoxLayout()
@@ -177,13 +188,68 @@ class TunerWindow(QMainWindow):
 
         # Po starcie wczytaj aktualne values z yaml plus zaaplikuj na slider.
         self._load_yaml_into_sliders()
+        self._pub_count_timer = QTimer(self)
+        self._pub_count_timer.timeout.connect(self._update_scan_publishers_count)
+        self._pub_count_timer.start(1000)
+
+    def _kill_all_converters(self) -> None:
+        try:
+            subprocess.run(
+                ['pkill', '-f', 'pointcloud_to_laserscan_node'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+        except Exception:
+            pass
+        time.sleep(0.3)
+
+    def _start_converter(self, min_h: float, max_h: float) -> None:
+        cmd = self._build_converter_cmd(min_h=min_h, max_h=max_h)
+        try:
+            self._pcl_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.6)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, 'Autostart fail',
+                f'Nie udało się odpalić pointcloud_to_laserscan:\n{exc}'
+            )
+
+    def _ensure_single_converter_running(self) -> None:
+        self._kill_all_converters()
+        self._start_converter(min_h=-1.0, max_h=1.0)
+
+    def _build_converter_cmd(self, min_h: float, max_h: float) -> list[str]:
+        return [
+            'ros2', 'run', 'pointcloud_to_laserscan', 'pointcloud_to_laserscan_node',
+            '--ros-args',
+            '--params-file', DEFAULT_YAML,
+            '-p', f'min_height:={min_h}',
+            '-p', f'max_height:={max_h}',
+            '-r', '__node:=pointcloud_to_laserscan',
+            '-r', f'cloud_in:={DEFAULT_CLOUD_TOPIC}',
+            '-r', 'scan:=/scan',
+        ]
+
+    def _restart_converter_with_current_values(self) -> None:
+        min_h = float(self.min_spin.value())
+        max_h = float(self.max_spin.value())
+        try:
+            self._kill_all_converters()
+            self._start_converter(min_h=min_h, max_h=max_h)
+        except Exception:
+            pass
 
     def _make_slider_pair(self, name: str, default: float):
-        slider = QSlider(Qt.Orientation.Horizontal)
+        slider = QSlider(Qt.Horizontal)
         steps = int((MAX_VAL - MIN_VAL) / STEP)
         slider.setRange(0, steps)
         slider.setValue(int((default - MIN_VAL) / STEP))
-        slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        slider.setTickPosition(QSlider.TicksBelow)
         slider.setTickInterval(int(0.5 / STEP))
 
         spin = QDoubleSpinBox()
@@ -212,11 +278,9 @@ class TunerWindow(QMainWindow):
         return slider, spin
 
     def _apply_live(self, param: str, value: float) -> None:
-        # subprocess do ros2 param set — async, krótko.
-        cmd = ['ros2', 'param', 'set', self.node_name, param, str(value)]
-        threading.Thread(target=lambda: subprocess.run(
-            cmd, capture_output=True, timeout=2,
-        ), daemon=True).start()
+        # W praktyce ten node nie aplikuje min/max dynamicznie, więc
+        # robimy krótko opóźniony restart z nowymi parametrami.
+        self._restart_timer.start(250)
 
     def _apply_preset(self, lo: float, hi: float) -> None:
         self.min_spin.setValue(lo)
@@ -235,6 +299,23 @@ class TunerWindow(QMainWindow):
             self.lbl_status.setStyleSheet('background: #442; color: #ffc; padding: 8px;')
         else:
             self.lbl_status.setStyleSheet('background: #242; color: #cfc; padding: 8px;')
+
+    def _update_scan_publishers_count(self) -> None:
+        count = 0
+        try:
+            out = subprocess.run(
+                ['ros2', 'topic', 'info', '/scan'],
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+            ).stdout
+            for line in out.splitlines():
+                if 'Publisher count:' in line:
+                    count = int(line.split(':', 1)[1].strip())
+                    break
+        except Exception:
+            pass
+        self.lbl_publishers.setText(f'scan publishers: {count}')
 
     def _load_yaml_into_sliders(self) -> None:
         try:
@@ -277,6 +358,8 @@ class TunerWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         try:
+            if self._pcl_proc is not None and self._pcl_proc.poll() is None:
+                self._pcl_proc.terminate()
             self.node.destroy_node()
             rclpy.shutdown()
         except Exception:
@@ -288,7 +371,7 @@ def main():
     app = QApplication(sys.argv)
     win = TunerWindow()
     win.show()
-    sys.exit(app.exec())
+    sys.exit(app.exec_())
 
 
 if __name__ == '__main__':

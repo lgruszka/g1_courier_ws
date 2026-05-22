@@ -2,7 +2,7 @@
 
 Rozszerzony grid kombinacji (~30+ wariantów):
 - Z-slice (16 pasm wysokości)
-- 3 wartości resolution (0.025, 0.05, 0.10)
+- 3 wartości resolution (0.03, 0.05, 0.10)
 - 3 wartości min_points_per_cell (1, 2, 4)
 - Flagowe kombinacje rozszerzone (resolution + density sweep)
 
@@ -27,6 +27,8 @@ from datetime import datetime
 import numpy as np
 from PIL import Image
 from scipy import ndimage as ndi
+
+BASE_RESOLUTION = 0.03
 
 
 def parse_pcd(path: str) -> np.ndarray:
@@ -181,7 +183,7 @@ def build_variants_grid(default_res: float = 0.05,
     # Resolution sweep na flagowym slice (desks_mid-like).
     # Stałe wartości: 0.02 (bardzo drobne, mebla nogi widoczne), 0.025, 0.05 (standard), 0.10
     FLAG_ZMIN, FLAG_ZMAX = 0.30, 0.85
-    for res in (0.02, 0.025, 0.05, 0.10):
+    for res in (BASE_RESOLUTION, 0.05, 0.10, 0.01, 0.001):
         variants.append((
             f'flag_res{int(res*1000):03d}', FLAG_ZMIN, FLAG_ZMAX, res, 2, D, C,
             f'flagowy slice 0.30-0.85 @ {res*100:.1f} cm/px'
