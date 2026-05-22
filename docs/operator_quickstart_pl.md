@@ -13,7 +13,7 @@ robot odpalony, Livox driver chodzi, workspace zbudowany.
    `min_height/max_height`. Slider zmienia params **bez restartu** —
    widzisz efekt w RViz natychmiast. Save gdy znajdziesz dobre.
 
-3. **`tools/map_picker.py`** — PyQt6 GUI do przeglądu wariantów map
+3. **`tools/map_picker.py`** — PyQt5 GUI do przeglądu wariantów map
    (~30 z `pcd_variant_grid`). Wybierasz najlepszą wzrokowo, klik →
    zapis jako produkcyjna `~/maps/lab.yaml`.
 
@@ -23,7 +23,7 @@ robot odpalony, Livox driver chodzi, workspace zbudowany.
 ## Jednorazowy setup
 
 ```bash
-sudo apt install python3-pyqt6 python3-yaml
+sudo apt install python3-pyqt5 python3-yaml
 cd ~/g1_courier_ws
 git pull
 colcon build --symlink-install

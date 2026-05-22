@@ -98,12 +98,12 @@ def generate_launch_description() -> LaunchDescription:
 
         # RViz z presetem FAST-LIO. Default config (fastlio.rviz) pokazuje
         # /cloud_registered + /path + /Odometry z Fixed Frame "camera_init".
-        # Node(
-        #     package='rviz2',
-        #     executable='rviz2',
-        #     name='rviz2_fastlio',
-        #     arguments=rviz_args,
-        #     condition=IfCondition(LaunchConfiguration('rviz')),
-        #     output='screen',
-        # ),
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2_fastlio',
+            arguments=rviz_args,
+            condition=IfCondition(LaunchConfiguration('rviz')),
+            output='screen',
+        ),
     ])

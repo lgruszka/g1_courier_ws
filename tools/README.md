@@ -83,7 +83,7 @@ python3 tools/pcd_variant_grid.py ~/maps/last_session.pcd ~/maps/scenarios --fli
 
 ## `map_picker.py`
 
-PyQt6 GUI: lista wariantów + preview PGM + Save as production
+PyQt5 GUI: lista wariantów + preview PGM + Save as production
 (`~/maps/lab.yaml` + `lab.pgm` — odbierane przez `real.launch.py`).
 
 ```bash
@@ -108,7 +108,7 @@ python3 tools/scan_height_tuner.py
 Slidery + 5 preset buttons + status (Hz, valid pts %). Po znalezieniu
 dobrego slice → **Save to yaml**.
 
-Wymaga: `python3-pyqt6 python3-yaml`.
+Wymaga: `python3-pyqt5 python3-yaml`.
 
 ## `fastlio_pcd_to_pgm.py`
 

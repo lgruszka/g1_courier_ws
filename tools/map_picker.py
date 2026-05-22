@@ -10,7 +10,7 @@ Funkcje:
   ~/maps/lab.pgm + ~/maps/lab.yaml (override defaultu real.launch.py).
 - Przycisk **Open in external viewer** — odpala eog/xdg-open na PGM
 
-Wymaga: PyQt6 (sudo apt install python3-pyqt6).
+Wymaga: PyQt5 (sudo apt install python3-pyqt5).
 """
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ import shutil
 import subprocess
 import sys
 
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QPixmap, QFont
-from PyQt6.QtWidgets import (
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
@@ -52,11 +52,11 @@ class MapPicker(QMainWindow):
             f'<b>Flip-Y:</b> {self.manifest.get("flip_y", False)}  '
             f'<b>Points:</b> {self.manifest.get("total_points", "?")}'
         )
-        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setTextFormat(Qt.RichText)
         root.addWidget(info)
 
         # Splitter: lista po lewej, preview + buttons po prawej.
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, stretch=1)
 
         # Lewa strona — lista wariantów.
@@ -72,7 +72,7 @@ class MapPicker(QMainWindow):
                 f"{v['cols']}×{v['rows']}  occ={v['occupied_cells']}"
             )
             item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, v)
+            item.setData(Qt.UserRole, v)
             self.list_widget.addItem(item)
         self.list_widget.currentItemChanged.connect(self._on_variant_selected)
         left_layout.addWidget(self.list_widget)
@@ -82,14 +82,14 @@ class MapPicker(QMainWindow):
         right_layout = QVBoxLayout(right)
 
         self.preview = QLabel()
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(QSize(600, 600))
         self.preview.setStyleSheet('background: #222; color: #888;')
         self.preview.setText('(wybierz wariant z listy po lewej)')
         right_layout.addWidget(self.preview, stretch=1)
 
         self.detail = QLabel()
-        self.detail.setTextFormat(Qt.TextFormat.RichText)
+        self.detail.setTextFormat(Qt.RichText)
         self.detail.setWordWrap(True)
         self.detail.setStyleSheet('background: #333; color: #ddd; padding: 6px;')
         right_layout.addWidget(self.detail)
@@ -140,7 +140,7 @@ class MapPicker(QMainWindow):
     def _on_variant_selected(self, current: QListWidgetItem, _previous) -> None:
         if current is None:
             return
-        variant = current.data(Qt.ItemDataRole.UserRole)
+        variant = current.data(Qt.UserRole)
         self.current_variant = variant
 
         pgm_path = os.path.join(self.scenarios_dir, variant['pgm'])
@@ -150,8 +150,8 @@ class MapPicker(QMainWindow):
         else:
             # Skaluj zachowując aspect ratio.
             target = self.preview.size()
-            scaled = pixmap.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
-                                   Qt.TransformationMode.SmoothTransformation)
+            scaled = pixmap.scaled(target, Qt.KeepAspectRatio,
+                                   Qt.SmoothTransformation)
             self.preview.setPixmap(scaled)
 
         # Detal.
@@ -242,7 +242,7 @@ def main():
     app = QApplication(sys.argv)
     window = MapPicker(os.path.abspath(args.scenarios_dir))
     window.show()
-    sys.exit(app.exec())
+    sys.exit(app.exec_())
 
 
 if __name__ == '__main__':

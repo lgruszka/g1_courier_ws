@@ -11,6 +11,9 @@
 
 set -euo pipefail
 
+# Katalog skryptu (odporny na zmianę cwd w trakcie działania).
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+
 # --- konfiguracja ---
 PCD_OUT="${PCD_OUT:-$HOME/maps/last_session.pcd}"
 SCENARIOS_DIR="${SCENARIOS_DIR:-$HOME/maps/scenarios_$(date +%Y%m%d_%H%M%S)}"
@@ -139,11 +142,9 @@ sleep 2
 
 # --- variant generation ---
 log "generuję warianty (pcd_variant_grid)..."
-# WS_ROOT już policzone na początku PRZED `cd` — bezpieczne źródło ścieżki tools/
-TOOLS_DIR="$WS_ROOT/tools"
 FLIP_ARG=""
 [[ "$FLIP_Y" == "1" ]] && FLIP_ARG="--flip-y"
-python3 "$TOOLS_DIR/pcd_variant_grid.py" "$PCD_OUT" "$SCENARIOS_DIR" $FLIP_ARG
+python3 "$SCRIPT_DIR/pcd_variant_grid.py" "$PCD_OUT" "$SCENARIOS_DIR" $FLIP_ARG
 
 # --- launch picker ---
 log "uruchamiam map picker..."
@@ -151,6 +152,6 @@ log "  W picker wybierz najlepszy wariant → 'Save as production map'"
 log "  Mapa zostanie zapisana jako ~/maps/lab.yaml + lab.pgm"
 log "  Potem: ros2 launch g1_courier_bringup real.launch.py map:=\$HOME/maps/lab.yaml"
 
-python3 "$TOOLS_DIR/map_picker.py" "$SCENARIOS_DIR" || true
+python3 "$SCRIPT_DIR/map_picker.py" "$SCENARIOS_DIR" || true
 
 log "session done — PCD: $PCD_OUT, scenarios: $SCENARIOS_DIR"

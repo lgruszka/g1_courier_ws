@@ -58,7 +58,8 @@ colcon build --packages-select \
   g1_courier_docking \
   g1_courier_arm_skills \
   g1_courier_mission \
-  g1_courier_safety
+  g1_courier_safety \
+  g1_description
 
 set +u
 source install/setup.bash
