@@ -26,6 +26,7 @@ from datetime import datetime
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage as ndi
 
 
 def parse_pcd(path: str) -> np.ndarray:
@@ -78,7 +79,15 @@ def parse_pcd(path: str) -> np.ndarray:
 
 
 def rasterize(pts: np.ndarray, z_min: float, z_max: float,
-              resolution: float, min_pts_per_cell: int):
+              resolution: float, min_pts_per_cell: int,
+              dilate: int = 0, close: int = 0):
+    """Wycina warstwę Z, rasteryzuje do grid'a, opcjonalnie dilatuje/zamyka.
+
+    dilate=N → expand occupied cells o N pikseli (fills small gaps in walls,
+    but thickens overall).
+    close=N → dilate(N) then erode(N) — closes holes WITHOUT thickening overall
+    (preferred dla scan matching gdy ściany mają luki ale grubość ma znaczenie).
+    """
     mask = (pts[:, 2] >= z_min) & (pts[:, 2] <= z_max)
     sel = pts[mask]
     if len(sel) == 0:
@@ -96,8 +105,19 @@ def rasterize(pts: np.ndarray, z_min: float, z_max: float,
     count = np.zeros((rows, cols), dtype=np.int32)
     np.add.at(count, (row_idx, col_idx), 1)
 
+    occupied = count >= min_pts_per_cell
+
+    # Morphological post-processing — pomaga gdy chmura jest rzadka i ściany
+    # wychodzą "kropkowane" zamiast ciągłej linii. AMCL/scan-match potrzebuje
+    # solidnych konturów.
+    if close > 0:
+        # binary_closing = dilation -> erosion, fills gaps but keeps thickness
+        occupied = ndi.binary_closing(occupied, iterations=close)
+    if dilate > 0:
+        occupied = ndi.binary_dilation(occupied, iterations=dilate)
+
     pgm = np.full((rows, cols), 205, dtype=np.uint8)
-    pgm[count >= min_pts_per_cell] = 0
+    pgm[occupied] = 0
     pgm = np.flipud(pgm)
     return pgm, x_min, y_min, len(sel)
 
@@ -118,12 +138,14 @@ def write_variant(out_dir: str, base: str, pgm, x0, y0, resolution: float):
         )
 
 
-def build_variants_grid(default_res: float = 0.05) -> list[tuple]:
-    """Zwraca listę (name, z_min, z_max, resolution, min_pts, opis).
+def build_variants_grid(default_res: float = 0.05,
+                        default_dilate: int = 0,
+                        default_close: int = 0) -> list[tuple]:
+    """Zwraca listę (name, z_min, z_max, resolution, min_pts, dilate, close, opis).
 
-    `default_res` aplikowane do wszystkich narrow/wide/go2/density/shift wariantów.
-    Resolution sweep zawsze zawiera kilka stałych wartości żeby porównanie było
-    możliwe niezależnie od override.
+    `default_res/dilate/close` aplikowane do wszystkich narrow/wide/go2/density/shift
+    wariantów. Resolution sweep i morpho sweep zawsze mają stałe wartości żeby
+    porównanie było możliwe niezależnie od overrides.
     """
     # Wąskie pasma 0.20-0.35 m wysokości — żeby uchwycić konkretne struktury.
     narrow = [
@@ -151,23 +173,24 @@ def build_variants_grid(default_res: float = 0.05) -> list[tuple]:
     ]
 
     variants = []
-    # Wszystkie wariantów Z @ globalny default_res (CLI --resolution), min_pts 2
+    D, C = default_dilate, default_close
+    # Wszystkie wariantów Z @ globalny default_res/dilate/close (CLI), min_pts 2
     for name, z_min, z_max, comment in narrow + wide + go2_specific:
-        variants.append((name, z_min, z_max, default_res, 2, comment))
+        variants.append((name, z_min, z_max, default_res, 2, D, C, comment))
 
     # Resolution sweep na flagowym slice (desks_mid-like).
     # Stałe wartości: 0.02 (bardzo drobne, mebla nogi widoczne), 0.025, 0.05 (standard), 0.10
     FLAG_ZMIN, FLAG_ZMAX = 0.30, 0.85
     for res in (0.02, 0.025, 0.05, 0.10):
         variants.append((
-            f'flag_res{int(res*1000):03d}', FLAG_ZMIN, FLAG_ZMAX, res, 2,
+            f'flag_res{int(res*1000):03d}', FLAG_ZMIN, FLAG_ZMAX, res, 2, D, C,
             f'flagowy slice 0.30-0.85 @ {res*100:.1f} cm/px'
         ))
 
     # Density sweep na flagowym slice — używa default_res
     for mpts in (1, 2, 4, 8):
         variants.append((
-            f'flag_density_m{mpts}', FLAG_ZMIN, FLAG_ZMAX, default_res, mpts,
+            f'flag_density_m{mpts}', FLAG_ZMIN, FLAG_ZMAX, default_res, mpts, D, C,
             f'flagowy slice 0.30-0.85, min_pts={mpts} (większy = mniej szumu)'
         ))
 
@@ -176,8 +199,22 @@ def build_variants_grid(default_res: float = 0.05) -> list[tuple]:
         zmin, zmax = 0.50 + shift, 0.90 + shift
         variants.append((
             f'sweep_shifted_z{zmin:.2f}',
-            zmin, zmax, default_res, 2,
+            zmin, zmax, default_res, 2, D, C,
             f'shift slice {shift:+.2f} m vs flag'
+        ))
+
+    # Morpho sweep na flagship slice — fix dla rzadkich ścian (kropkowane → solidne)
+    # Dilate = expand occupied o N px (pogrubia ścianę).
+    # Close = dilate+erode (wypełnia luki bez pogrubiania).
+    for d in (1, 2, 3):
+        variants.append((
+            f'flag_dilate{d}', FLAG_ZMIN, FLAG_ZMAX, default_res, 2, d, 0,
+            f'flagowy slice + dilate {d}px (zapełnia luki w rzadkich ścianach)'
+        ))
+    for c in (1, 2, 3):
+        variants.append((
+            f'flag_close{c}', FLAG_ZMIN, FLAG_ZMAX, default_res, 2, 0, c,
+            f'flagowy slice + close {c}px (luki ZAMKNIĘTE bez pogrubienia)'
         ))
 
     return variants
@@ -196,6 +233,17 @@ def main():
                              '/scan nie pasuje do mapy bo piksele za grube. Resolution '
                              'sweep na flagowym slice zawsze ma 0.02/0.025/0.05/0.10 '
                              'do porównania niezależnie od tego.')
+    parser.add_argument('--dilate', type=int, default=0,
+                        help='Po rasteryzacji rozszerz każdą occupied komórkę o N '
+                             'pikseli (binary_dilation). Pomaga gdy chmura jest rzadka '
+                             'i ściany są przerywane — AMCL/scan-match potrzebuje '
+                             'ciągłych konturów. 1-2 zwykle wystarczy. Per scenarios '
+                             'sweep również generuje morpho-warianty niezależnie od tej '
+                             'flagi.')
+    parser.add_argument('--close', type=int, default=0,
+                        help='binary_closing (dilate→erode) — wypełnia luki BEZ '
+                             'pogrubiania ścian. Lepsze dla scan-match niż --dilate '
+                             'gdy grubość ścian ma znaczenie.')
     parser.add_argument('--quiet', action='store_true')
     args = parser.parse_args()
 
@@ -233,32 +281,37 @@ def main():
             print(f'    [{edges[i]:+.2f} .. {edges[i+1]:+.2f}]  {h[i]:>7d}  {bar}')
 
     os.makedirs(args.out_dir, exist_ok=True)
-    variants = build_variants_grid(default_res=args.resolution)
+    variants = build_variants_grid(default_res=args.resolution,
+                                    default_dilate=args.dilate,
+                                    default_close=args.close)
     print(f'\n  default resolution: {args.resolution} m/px ({args.resolution*100:.1f} cm/px)')
+    if args.dilate: print(f'  default dilate: {args.dilate}px')
+    if args.close: print(f'  default close: {args.close}px')
 
     print(f'\nGenerating {len(variants)} variants → {args.out_dir}/')
     print('=' * 100)
     manifest = []
-    for name, z_min, z_max, resolution, min_pts, comment in variants:
-        pgm, x0, y0, n = rasterize(pts, z_min, z_max, resolution, min_pts)
+    for name, z_min, z_max, resolution, min_pts, dilate, close, comment in variants:
+        pgm, x0, y0, n = rasterize(pts, z_min, z_max, resolution, min_pts, dilate, close)
         if pgm is None:
             print(f'  {name:24s}  [{z_min:+.2f}..{z_max:+.2f}] r={resolution}  EMPTY')
             continue
-        base = f'{name}_z{z_min:+.2f}_{z_max:+.2f}_r{resolution}_m{min_pts}'
-        base = base.replace('+', 'p').replace('-', 'm').replace('.', '')
-        # ostatecznie wracam do '.' dla resolution, łatwiejsze do zinterpretowania.
-        # Plus krótka nazwa — sam variant name + zakres czytelny:
         safe_name = name.replace('+', 'p').replace('-', 'm')
-        base = f'{safe_name}_r{resolution}_m{min_pts}'
+        morpho_tag = ''
+        if dilate > 0: morpho_tag += f'_d{dilate}'
+        if close > 0: morpho_tag += f'_c{close}'
+        base = f'{safe_name}_r{resolution}_m{min_pts}{morpho_tag}'
         write_variant(args.out_dir, base, pgm, x0, y0, resolution)
         rows, cols = pgm.shape
         occ = int((pgm == 0).sum())
+        morpho_str = (f' d{dilate}' if dilate else '') + (f' c{close}' if close else '')
         print(f'  {name:24s}  [{z_min:+.2f}..{z_max:+.2f}] r={resolution} '
-              f'm={min_pts} → {cols:>4}×{rows:<4}px  {occ:>6} occ  ({comment})')
+              f'm={min_pts}{morpho_str} → {cols:>4}×{rows:<4}px  {occ:>6} occ  ({comment})')
         manifest.append({
             'name': name, 'base': base,
             'z_min': z_min, 'z_max': z_max,
             'resolution': resolution, 'min_pts_per_cell': min_pts,
+            'dilate': dilate, 'close': close,
             'comment': comment, 'cols': cols, 'rows': rows,
             'occupied_cells': occ, 'source_points': n,
             'pgm': f'{base}.pgm', 'yaml': f'{base}.yaml',
