@@ -6,8 +6,14 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
+from sensor_msgs.msg import CameraInfo, Image
 
 
 def _inject_venv_site_packages() -> None:
@@ -41,9 +47,12 @@ class D435iNode(Node):
         self.declare_parameter('height', 480)
         self.declare_parameter('fps', 30)
         self.declare_parameter('image_topic', '/camera/image_raw')
+        self.declare_parameter('camera_info_topic', '/camera/color/camera_info')
         self.declare_parameter('depth_topic', '/camera/depth/image_rect_raw')
         self.declare_parameter('legacy_color_topic', '/camera/color/image_raw')
         self.declare_parameter('publish_legacy_color_topic', True)
+        self.declare_parameter('legacy_camera_info_topic', '/camera_info')
+        self.declare_parameter('publish_legacy_camera_info_topic', True)
         self.declare_parameter('publish_depth_topic', True)
         self.declare_parameter('depth_max_distance_m', 4.0)
         self.declare_parameter('frame_id', 'camera_color_optical_frame')
@@ -62,10 +71,17 @@ class D435iNode(Node):
         self.height = self.requested_height
         self.fps = self.requested_fps
         self.image_topic = str(self.get_parameter('image_topic').value)
+        self.camera_info_topic = str(self.get_parameter('camera_info_topic').value)
         self.depth_topic = str(self.get_parameter('depth_topic').value)
         self.legacy_color_topic = str(self.get_parameter('legacy_color_topic').value)
         self.publish_legacy_color_topic = bool(
             self.get_parameter('publish_legacy_color_topic').value
+        )
+        self.legacy_camera_info_topic = str(
+            self.get_parameter('legacy_camera_info_topic').value
+        )
+        self.publish_legacy_camera_info_topic = bool(
+            self.get_parameter('publish_legacy_camera_info_topic').value
         )
         self.publish_depth_topic = bool(self.get_parameter('publish_depth_topic').value)
         self.depth_max_distance_m = max(0.0, float(self.get_parameter('depth_max_distance_m').value))
@@ -77,11 +93,28 @@ class D435iNode(Node):
         # Publishers — sensor_data QoS = BEST_EFFORT, depth=5. Critical for cameras:
         # avoids RELIABLE buffering when a downstream subscriber stalls.
         self.image_pub = self.create_publisher(Image, self.image_topic, qos_profile_sensor_data)
+        self.camera_info_pub = self.create_publisher(
+            CameraInfo, self.camera_info_topic, qos_profile_sensor_data
+        )
         self.legacy_pub = None
+        self.legacy_camera_info_pub = None
         self.depth_pub = None
         if self.publish_legacy_color_topic and self.legacy_color_topic != self.image_topic:
             self.legacy_pub = self.create_publisher(
                 Image, self.legacy_color_topic, qos_profile_sensor_data
+            )
+        legacy_cam_info_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        if (
+            self.publish_legacy_camera_info_topic
+            and self.legacy_camera_info_topic != self.camera_info_topic
+        ):
+            self.legacy_camera_info_pub = self.create_publisher(
+                CameraInfo, self.legacy_camera_info_topic, legacy_cam_info_qos
             )
         if self.publish_depth_topic:
             self.depth_pub = self.create_publisher(
@@ -96,6 +129,7 @@ class D435iNode(Node):
         self.height = self.stream_profile.height()
         self.fps = self.stream_profile.fps()
         self.stream_format = self.stream_profile.format()
+        self.color_intrinsics = self.stream_profile.get_intrinsics()
         self.depth_width = self.depth_profile.width()
         self.depth_height = self.depth_profile.height()
         self.depth_fps = self.depth_profile.fps()
@@ -145,6 +179,11 @@ class D435iNode(Node):
         )
         if self.legacy_pub is not None:
             self.get_logger().info(f'Also publishing legacy color topic: {self.legacy_color_topic}')
+        self.get_logger().info(f'Publishing camera info to {self.camera_info_topic}')
+        if self.legacy_camera_info_pub is not None:
+            self.get_logger().info(
+                f'Also publishing legacy camera info topic: {self.legacy_camera_info_topic}'
+            )
         if self.depth_pub is not None:
             align_str = 'aligned to color' if self.align_depth_to_color else 'native depth frame'
             self.get_logger().info(
@@ -311,24 +350,38 @@ class D435iNode(Node):
         color_subs = self.image_pub.get_subscription_count()
         if self.legacy_pub is not None:
             color_subs += self.legacy_pub.get_subscription_count()
+        camera_info_subs = self.camera_info_pub.get_subscription_count()
+        if self.legacy_camera_info_pub is not None:
+            camera_info_subs += self.legacy_camera_info_pub.get_subscription_count()
 
-        # Build color message only if anybody is subscribed.
-        if color_subs > 0:
+        # Build color + CameraInfo only if somebody is consuming them.
+        if color_subs > 0 or camera_info_subs > 0:
             stamp = self._stamp_from_frame(color_frame)
-            image = Image()
-            image.header.stamp = stamp
-            image.header.frame_id = self.frame_id
-            image.height = int(color_frame.get_height())
-            image.width = int(color_frame.get_width())
-            image.encoding = 'bgr8'
-            image.is_bigendian = 0
-            image.step = image.width * 3
-            image.data = self._frame_to_bgr8(color_frame)
+            camera_info = self._camera_info_msg(stamp)
 
-            if self.image_pub.get_subscription_count() > 0:
-                self.image_pub.publish(image)
-            if self.legacy_pub is not None and self.legacy_pub.get_subscription_count() > 0:
-                self.legacy_pub.publish(image)
+            if color_subs > 0:
+                image = Image()
+                image.header.stamp = stamp
+                image.header.frame_id = self.frame_id
+                image.height = int(color_frame.get_height())
+                image.width = int(color_frame.get_width())
+                image.encoding = 'bgr8'
+                image.is_bigendian = 0
+                image.step = image.width * 3
+                image.data = self._frame_to_bgr8(color_frame)
+
+                if self.image_pub.get_subscription_count() > 0:
+                    self.image_pub.publish(image)
+                if self.legacy_pub is not None and self.legacy_pub.get_subscription_count() > 0:
+                    self.legacy_pub.publish(image)
+
+            if self.camera_info_pub.get_subscription_count() > 0:
+                self.camera_info_pub.publish(camera_info)
+            if (
+                self.legacy_camera_info_pub is not None
+                and self.legacy_camera_info_pub.get_subscription_count() > 0
+            ):
+                self.legacy_camera_info_pub.publish(camera_info)
 
         # Depth publish — skipped entirely if no subscribers (no copy, no NaN mask).
         if depth_subs > 0:
@@ -381,6 +434,42 @@ class D435iNode(Node):
         image.step = image.width * 4
         image.data = np.ascontiguousarray(depth_m).tobytes()
         return image
+
+    def _camera_info_msg(self, stamp) -> CameraInfo:
+        intrinsics = self.color_intrinsics
+        camera_info = CameraInfo()
+        camera_info.header.stamp = stamp
+        camera_info.header.frame_id = self.frame_id
+        camera_info.height = int(intrinsics.height)
+        camera_info.width = int(intrinsics.width)
+        camera_info.distortion_model = self._distortion_model_name(intrinsics.model)
+        camera_info.d = [float(coeff) for coeff in intrinsics.coeffs]
+        camera_info.k = [
+            float(intrinsics.fx), 0.0, float(intrinsics.ppx),
+            0.0, float(intrinsics.fy), float(intrinsics.ppy),
+            0.0, 0.0, 1.0,
+        ]
+        camera_info.r = [
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0,
+        ]
+        camera_info.p = [
+            float(intrinsics.fx), 0.0, float(intrinsics.ppx), 0.0,
+            0.0, float(intrinsics.fy), float(intrinsics.ppy), 0.0,
+            0.0, 0.0, 1.0, 0.0,
+        ]
+        return camera_info
+
+    @staticmethod
+    def _distortion_model_name(model) -> str:
+        if model in (rs.distortion.brown_conrady, rs.distortion.inverse_brown_conrady):
+            return 'plumb_bob'
+        if model == rs.distortion.kannala_brandt4:
+            return 'equidistant'
+        if hasattr(rs.distortion, 'ftheta') and model == rs.distortion.ftheta:
+            return 'ftheta'
+        return 'plumb_bob'
 
     def destroy_node(self) -> bool:
         self._stop_event.set()

@@ -1,6 +1,6 @@
 apriltag_node:
   ros__parameters:
-    family: 36h11
+    family: 16h5
     size: 0.10              # box tag physical side length [m] — only tag in system
     max_hamming: 0
     z_up: false
@@ -14,4 +14,4 @@ apriltag_node:
     tag:
       ids: [10]             # box (cardboard parcel) — the only AprilTag we use
       frames: [tag_box]
-      sizes: [0.10]
+      sizes: [0.08]

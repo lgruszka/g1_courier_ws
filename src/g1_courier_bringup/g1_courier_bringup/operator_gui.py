@@ -13,7 +13,7 @@ Layout:
   │ Set Initial Pose │ E-Stop           │              │
   └──────────────────┴──────────────────┴──────────────┘
 
-Wymagania: pip install PyQt6
+Wymagania: pip install PyQt5 (opcjonalnie PyQt6)
 """
 from __future__ import annotations
 
@@ -30,14 +30,26 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 
-from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QPalette, QColor
-from PyQt6.QtWidgets import (
-    QApplication, QButtonGroup, QComboBox, QDoubleSpinBox, QFormLayout,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
-)
+try:
+    from PyQt5.QtCore import QObject, pyqtSignal
+    from PyQt5.QtGui import QFont
+    from PyQt5.QtWidgets import (
+        QApplication, QButtonGroup, QComboBox, QDoubleSpinBox, QFormLayout,
+        QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
+        QPlainTextEdit, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    )
+    HAVE_PYQT6 = False
+except ImportError:
+    from PyQt6.QtCore import QObject, pyqtSignal
+    from PyQt6.QtGui import QFont
+    from PyQt6.QtWidgets import (
+        QApplication, QButtonGroup, QComboBox, QDoubleSpinBox, QFormLayout,
+        QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
+        QPlainTextEdit, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    )
+    HAVE_PYQT6 = True
 
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
@@ -97,7 +109,9 @@ class RosBridge(QObject):
         )
         self._scan_count = 0
         self._scan_t0 = time.monotonic()
-        self.node.create_subscription(LaserScan, '/scan', self._on_scan, 10)
+        self.node.create_subscription(
+            LaserScan, '/scan', self._on_scan, qos_profile_sensor_data,
+        )
 
         if HAVE_LOWSTATE:
             self._lowstate_count = 0
@@ -611,7 +625,8 @@ def main() -> None:
     app = QApplication(sys.argv)
     window = OperatorWindow(bridge)
     window.show()
-    exit_code = app.exec()
+    # PyQt5 używa exec_(), PyQt6 ma exec().
+    exit_code = app.exec() if HAVE_PYQT6 else app.exec_()
 
     executor.shutdown()
     bridge.node.destroy_node()

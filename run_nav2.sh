@@ -2,7 +2,7 @@
 set -euo pipefail
 
 STACK_TIMEOUT_S="${STACK_TIMEOUT_S:-45}"
-MAP_PATH="../maps/lab.yaml"
+MAP_PATH="/home/unitree/maps/lab.yaml"
 
 # Post-start quick check (manual):
 # 1) ros2 topic hz /livox/lidar
@@ -72,4 +72,5 @@ wait_for_topic "/dog_odom" "$STACK_TIMEOUT_S"
 echo "[run_nav2] launching nav stack..."
 exec ros2 launch g1_courier_bringup real.launch.py \
   map:="$MAP_PATH" \
-  enable_mission:=false
+  enable_mission:=false \
+  enable_camera:=true
