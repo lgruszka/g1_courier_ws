@@ -422,6 +422,16 @@ class DockActionServer(Node):
 
             dx, dy, dyaw = self._extract_tag_residual(request.apriltag_id, request.target_pose)
             if dx is None:
+                # No detection — publikuj NaN na /dock/errors żeby GUI wiedział że
+                # serwer żyje ale tag nie widoczny (zamiast utknąć z ostatnią wart.)
+                err_msg = Vector3Stamped()
+                err_msg.header.stamp = self.get_clock().now().to_msg()
+                err_msg.header.frame_id = 'base_link'
+                err_msg.vector.x = float('nan')
+                err_msg.vector.y = float('nan')
+                err_msg.vector.z = float('nan')
+                self._err_pub.publish(err_msg)
+
                 no_det_count += 1
                 if no_det_count >= no_det_recovery_threshold:
                     # Tag lost for >1 s — back up slowly to recover FoV. Robot
@@ -633,6 +643,15 @@ class DockActionServer(Node):
             cmd, err = aligner.step(scan)
             if not math.isfinite(err.xy_m):
                 # RANSAC could not find a line this tick — wait for a better scan.
+                # Publikuj NaN na /dock/errors żeby GUI wiedział "line lost".
+                err_msg = Vector3Stamped()
+                err_msg.header.stamp = self.get_clock().now().to_msg()
+                err_msg.header.frame_id = 'base_link'
+                err_msg.vector.x = float('nan')
+                err_msg.vector.y = 0.0
+                err_msg.vector.z = float('nan')
+                self._err_pub.publish(err_msg)
+
                 self._publish_zero()
                 self._publish_feedback(goal_handle, 'searching', err)
                 time.sleep(period)

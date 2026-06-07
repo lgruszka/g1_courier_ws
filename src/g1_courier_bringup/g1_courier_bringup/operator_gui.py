@@ -599,8 +599,14 @@ class OperatorWindow(QMainWindow):
         self.lbl_amcl.setText(f'x={x:+.2f} y={y:+.2f} yaw={yaw_deg:+.0f}°')
 
     def _on_dock_errors(self, dx: float, dy: float, dyaw: float) -> None:
+        # NaN sygnalizuje "tag/line lost" — dock servo żyje ale aligner nie ma
+        # feature do dopasowania. Czerwone "NO TAG" żeby od razu było widać.
+        if math.isnan(dx) or math.isnan(dyaw):
+            self.lbl_dock_err.setText('NO TAG / LINE — server alive, no detection')
+            self.lbl_dock_err.setStyleSheet('font-family: monospace; color: #cc0000; font-weight: bold;')
+            return
         # Kolor: zielony jak każdy z błędów < threshold convergence (z dock_action_server
-        # default xy_tol=0.03, yaw_tol=0.05). Czerwony jeśli duży błąd, pomarańcz medium.
+        # default xy_tol=0.03, yaw_tol=0.05). Pomarańcz medium. Czerwony duży błąd.
         max_xy = max(abs(dx), abs(dy))
         if max_xy < 0.03 and abs(dyaw) < 0.05:
             color = '#22aa22'   # converged
