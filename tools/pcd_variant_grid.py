@@ -142,12 +142,18 @@ def write_variant(out_dir: str, base: str, pgm, x0, y0, resolution: float):
 
 def build_variants_grid(default_res: float = 0.05,
                         default_dilate: int = 0,
-                        default_close: int = 0) -> list[tuple]:
+                        default_close: int = 0,
+                        morpho_all: bool = False) -> list[tuple]:
     """Zwraca listę (name, z_min, z_max, resolution, min_pts, dilate, close, opis).
 
     `default_res/dilate/close` aplikowane do wszystkich narrow/wide/go2/density/shift
     wariantów. Resolution sweep i morpho sweep zawsze mają stałe wartości żeby
     porównanie było możliwe niezależnie od overrides.
+
+    `morpho_all=True` → applies dilate(1,2) + close(2,3) sweep na KAŻDY slice
+    (narrow/wide/go2 + alt flagships) zamiast tylko głównego flagship. Generuje
+    ~80+ variants. Użyj gdy nie wiesz który slice się sprawdzi i chcesz pełne
+    porównanie.
     """
     # Wąskie pasma 0.20-0.35 m wysokości — żeby uchwycić konkretne struktury.
     narrow = [
@@ -158,6 +164,8 @@ def build_variants_grid(default_res: float = 0.05,
         ('thin_mid_50',        0.50,  0.75, 'klasyczny Tomek-tested pasem biurek'),
         ('thin_mid_60',        0.60,  0.80, '20cm pas wyższy biurek'),
         ('thin_high_80',       0.80,  1.05, 'wyżej — siedziska / monitory'),
+        ('thin_very_high_13',  1.30,  1.60, 'górne meble + niskie banery / ściany działowe'),
+        ('thin_top_180',       1.80,  2.20, 'wysokie ścianki działowe / hala targowa'),
     ]
     # Szerokie pasma 0.5-1.5 m wysokości — ogólny "shape" sceny.
     wide = [
@@ -167,6 +175,9 @@ def build_variants_grid(default_res: float = 0.05,
         ('wide_mid_full',      0.30,  1.20, 'biurka + dolne monitory'),
         ('wide_high',          0.80,  1.60, 'górne meble + ściany'),
         ('wide_full',         -0.50,  1.80, 'cały sensowny zakres (bez sufitu i pod podłogą)'),
+        ('wide_hall_low',      0.20,  1.50, 'hala targowa low-to-mid (stoiska + ścianki działowe)'),
+        ('wide_hall_full',     0.20,  2.50, 'hala targowa - cały zakres ścianek + wysokich elem.'),
+        ('wide_hall_mid',      0.60,  1.80, 'środek wysokości ścianek targów (omija podłogę i sufit)'),
     ]
     # Bardzo specyficzne dla Go2 (lidar niżej niż na G1, ~0.4 m offset).
     go2_specific = [
@@ -176,27 +187,50 @@ def build_variants_grid(default_res: float = 0.05,
 
     variants = []
     D, C = default_dilate, default_close
-    # Wszystkie wariantów Z @ globalny default_res/dilate/close (CLI), min_pts 2
-    for name, z_min, z_max, comment in narrow + wide + go2_specific:
+
+    all_slices = narrow + wide + go2_specific
+    for name, z_min, z_max, comment in all_slices:
         variants.append((name, z_min, z_max, default_res, 2, D, C, comment))
 
-    # Resolution sweep na flagowym slice (desks_mid-like).
-    # Stałe wartości: 0.02 (bardzo drobne, mebla nogi widoczne), 0.025, 0.05 (standard), 0.10
-    FLAG_ZMIN, FLAG_ZMAX = 0.30, 0.85
-    for res in (BASE_RESOLUTION, 0.05, 0.10, 0.01, 0.001):
-        variants.append((
-            f'flag_res{int(res*1000):03d}', FLAG_ZMIN, FLAG_ZMAX, res, 2, D, C,
-            f'flagowy slice 0.30-0.85 @ {res*100:.1f} cm/px'
-        ))
+    # Multi-flagship: 4 różne flagship slices, każdy z własnym resolution +
+    # density + morpho sweep. Daje user'owi porównanie morpho na różnych pasmach
+    # Z bez przekręcania CLI. Resolution sweep używa BASE_RESOLUTION (Tomasz)
+    # plus klasyczne 0.05/0.10 plus ultra-drobne 0.01/0.001 dla testów precyzji.
+    flagships = [
+        ('flag_desks',     0.30, 0.85, 'biurka + base — standardowe'),
+        ('flag_low',       0.00, 0.60, 'niski pas — podłoga + meble nogi'),
+        ('flag_high',      0.85, 1.40, 'wyższy pas — górne meble + ścianki'),
+        ('flag_hall',      0.20, 1.80, 'hala — szeroki pas pomieszczenia'),
+    ]
 
-    # Density sweep na flagowym slice — używa default_res
-    for mpts in (1, 2, 4, 8):
-        variants.append((
-            f'flag_density_m{mpts}', FLAG_ZMIN, FLAG_ZMAX, default_res, mpts, D, C,
-            f'flagowy slice 0.30-0.85, min_pts={mpts} (większy = mniej szumu)'
-        ))
+    for fname, zmn, zmx, fdesc in flagships:
+        # Resolution sweep dla każdego flagship: BASE_RESOLUTION + 5cm/10cm
+        # standard + ultra-drobne 1cm/1mm dla precyzji (Tomasz dodał te ostatnie).
+        for res in (BASE_RESOLUTION, 0.05, 0.10, 0.01, 0.001):
+            variants.append((
+                f'{fname}_res{int(res*1000):03d}', zmn, zmx, res, 2, D, C,
+                f'{fdesc} @ {res*100:.1f} cm/px'
+            ))
+        # Density sweep
+        for mpts in (1, 2, 4):
+            variants.append((
+                f'{fname}_density_m{mpts}', zmn, zmx, default_res, mpts, D, C,
+                f'{fdesc}, min_pts={mpts}'
+            ))
+        # Dilate sweep
+        for d in (1, 2, 3):
+            variants.append((
+                f'{fname}_dilate{d}', zmn, zmx, default_res, 2, d, 0,
+                f'{fdesc} + dilate {d}px (pogrubia ścianę)'
+            ))
+        # Close sweep — szersze niż wcześniej (do 5px dla bardzo rzadkich map)
+        for c in (1, 2, 3, 4, 5):
+            variants.append((
+                f'{fname}_close{c}', zmn, zmx, default_res, 2, 0, c,
+                f'{fdesc} + close {c}px (luki zamknięte bez pogrubienia)'
+            ))
 
-    # Wide-net na podłogę (po flip-y dla upside-down) — używa default_res
+    # Wide-net na podłogę (po flip-y dla upside-down)
     for shift in (0.0, 0.2, 0.4):
         zmin, zmax = 0.50 + shift, 0.90 + shift
         variants.append((
@@ -205,19 +239,21 @@ def build_variants_grid(default_res: float = 0.05,
             f'shift slice {shift:+.2f} m vs flag'
         ))
 
-    # Morpho sweep na flagship slice — fix dla rzadkich ścian (kropkowane → solidne)
-    # Dilate = expand occupied o N px (pogrubia ścianę).
-    # Close = dilate+erode (wypełnia luki bez pogrubiania).
-    for d in (1, 2, 3):
-        variants.append((
-            f'flag_dilate{d}', FLAG_ZMIN, FLAG_ZMAX, default_res, 2, d, 0,
-            f'flagowy slice + dilate {d}px (zapełnia luki w rzadkich ścianach)'
-        ))
-    for c in (1, 2, 3):
-        variants.append((
-            f'flag_close{c}', FLAG_ZMIN, FLAG_ZMAX, default_res, 2, 0, c,
-            f'flagowy slice + close {c}px (luki ZAMKNIĘTE bez pogrubienia)'
-        ))
+    # OPCJONALNE: --morpho-all → close 2 + 3 plus dilate 1 + 2 do KAŻDEGO slice
+    # (z narrow/wide/go2). Generuje 4× tyle variants — użyteczne gdy chcesz pełne
+    # porównanie morpho × Z-band bez gadania z CLI 30 razy.
+    if morpho_all:
+        for name, z_min, z_max, comment in all_slices:
+            for c in (2, 3):
+                variants.append((
+                    f'{name}_close{c}', z_min, z_max, default_res, 2, 0, c,
+                    f'{comment} + close {c}px'
+                ))
+            for d in (1, 2):
+                variants.append((
+                    f'{name}_dilate{d}', z_min, z_max, default_res, 2, d, 0,
+                    f'{comment} + dilate {d}px'
+                ))
 
     return variants
 
@@ -246,6 +282,11 @@ def main():
                         help='binary_closing (dilate→erode) — wypełnia luki BEZ '
                              'pogrubiania ścian. Lepsze dla scan-match niż --dilate '
                              'gdy grubość ścian ma znaczenie.')
+    parser.add_argument('--morpho-all', action='store_true',
+                        help='Generuje dodatkowe morpho-warianty (close 2/3 + dilate '
+                             '1/2) dla KAŻDEGO Z-slice (narrow/wide/go2), nie tylko '
+                             'flagship. Daje ~80+ variants — użyj gdy nie wiesz który '
+                             'slice się sprawdzi i chcesz pełen sweep.')
     parser.add_argument('--quiet', action='store_true')
     args = parser.parse_args()
 
@@ -285,7 +326,8 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     variants = build_variants_grid(default_res=args.resolution,
                                     default_dilate=args.dilate,
-                                    default_close=args.close)
+                                    default_close=args.close,
+                                    morpho_all=args.morpho_all)
     print(f'\n  default resolution: {args.resolution} m/px ({args.resolution*100:.1f} cm/px)')
     if args.dilate: print(f'  default dilate: {args.dilate}px')
     if args.close: print(f'  default close: {args.close}px')
