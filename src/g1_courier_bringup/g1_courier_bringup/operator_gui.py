@@ -52,7 +52,7 @@ except ImportError:
     HAVE_PYQT6 = True
 
 from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist, Vector3Stamped
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 
@@ -79,6 +79,7 @@ class RosBridge(QObject):
     log_message = pyqtSignal(str, str)                             # level, text
     active_goal_changed = pyqtSignal(str, str)                     # action, info
     goal_finished = pyqtSignal(bool, str)                          # success, message
+    dock_errors_changed = pyqtSignal(float, float, float)          # dx_m, dy_m, dyaw_rad
 
     def __init__(self) -> None:
         super().__init__()
@@ -107,6 +108,11 @@ class RosBridge(QObject):
         self.node.create_subscription(
             PoseWithCovarianceStamped, '/amcl_pose', self._on_amcl, 10,
         )
+        # Live diagnostic dx/dy/dyaw z dock_action_server (publikuje co tick
+        # podczas servoing/settle, milknie gdy dock idle).
+        self.node.create_subscription(
+            Vector3Stamped, '/dock/errors', self._on_dock_errors, 10,
+        )
         self._scan_count = 0
         self._scan_t0 = time.monotonic()
         self.node.create_subscription(
@@ -130,6 +136,9 @@ class RosBridge(QObject):
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         self.amcl_pose_changed.emit(p.position.x, p.position.y, math.degrees(yaw))
+
+    def _on_dock_errors(self, msg: Vector3Stamped) -> None:
+        self.dock_errors_changed.emit(msg.vector.x, msg.vector.y, msg.vector.z)
 
     def _on_scan(self, _msg: LaserScan) -> None:
         self._scan_count += 1
@@ -381,6 +390,7 @@ class OperatorWindow(QMainWindow):
 
         # Połącz sygnały z ROS bridge.
         bridge.amcl_pose_changed.connect(self._on_amcl)
+        bridge.dock_errors_changed.connect(self._on_dock_errors)
         bridge.hz_changed.connect(self._on_hz)
         bridge.log_message.connect(self._on_log)
         bridge.active_goal_changed.connect(self._on_active_goal)
@@ -502,6 +512,13 @@ class OperatorWindow(QMainWindow):
         btn.setStyleSheet('background-color: #aa6622; color: white; padding: 8px;')
         btn.clicked.connect(self._on_dock_clicked)
         layout.addWidget(btn, 3, 0, 1, 4)
+
+        # Live dx/dy/dyaw z /dock/errors — aktywne tylko podczas dock servo.
+        # Idle = "(idle)". Po convergence i kolejnym dock'u resetuje się.
+        layout.addWidget(QLabel('errors:'), 4, 0)
+        self.lbl_dock_err = QLabel('(idle)')
+        self.lbl_dock_err.setStyleSheet('font-family: monospace; color: #888;')
+        layout.addWidget(self.lbl_dock_err, 4, 1, 1, 3)
         return box
 
     def _build_pick_place_group(self) -> QGroupBox:
@@ -580,6 +597,22 @@ class OperatorWindow(QMainWindow):
 
     def _on_amcl(self, x: float, y: float, yaw_deg: float) -> None:
         self.lbl_amcl.setText(f'x={x:+.2f} y={y:+.2f} yaw={yaw_deg:+.0f}°')
+
+    def _on_dock_errors(self, dx: float, dy: float, dyaw: float) -> None:
+        # Kolor: zielony jak każdy z błędów < threshold convergence (z dock_action_server
+        # default xy_tol=0.03, yaw_tol=0.05). Czerwony jeśli duży błąd, pomarańcz medium.
+        max_xy = max(abs(dx), abs(dy))
+        if max_xy < 0.03 and abs(dyaw) < 0.05:
+            color = '#22aa22'   # converged
+        elif max_xy < 0.10 and abs(dyaw) < 0.15:
+            color = '#cc6600'   # close
+        else:
+            color = '#cc0000'   # far
+        dyaw_deg = math.degrees(dyaw)
+        self.lbl_dock_err.setText(
+            f'dx={dx:+.3f}m  dy={dy:+.3f}m  dyaw={dyaw_deg:+.1f}°'
+        )
+        self.lbl_dock_err.setStyleSheet(f'font-family: monospace; color: {color};')
 
     def _on_hz(self, topic: str, hz: float) -> None:
         color = '#22aa22' if hz > 1 else '#cc6600' if hz > 0.1 else '#cc0000'
