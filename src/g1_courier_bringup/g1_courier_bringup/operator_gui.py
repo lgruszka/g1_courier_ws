@@ -394,6 +394,9 @@ class OperatorWindow(QMainWindow):
         bridge.hz_changed.connect(self._on_hz)
         bridge.log_message.connect(self._on_log)
         bridge.active_goal_changed.connect(self._on_active_goal)
+        # Goal end (any action) → reset dock error label do (idle), żeby nie
+        # zamrażało się na 'NO TAG' po timeout/abort.
+        bridge.goal_finished.connect(self._reset_dock_err_label)
 
     # ----- panele -----
 
@@ -597,6 +600,12 @@ class OperatorWindow(QMainWindow):
 
     def _on_amcl(self, x: float, y: float, yaw_deg: float) -> None:
         self.lbl_amcl.setText(f'x={x:+.2f} y={y:+.2f} yaw={yaw_deg:+.0f}°')
+
+    def _reset_dock_err_label(self, _ok: bool, _msg: str) -> None:
+        """Reset dock errors label do '(idle)' po zakończeniu dowolnego action.
+        Wywoływane przez goal_finished signal (timeout, success, cancel, abort)."""
+        self.lbl_dock_err.setText('(idle)')
+        self.lbl_dock_err.setStyleSheet('font-family: monospace; color: #888;')
 
     def _on_dock_errors(self, dx: float, dy: float, dyaw: float) -> None:
         # NaN sygnalizuje "tag/line lost" — dock servo żyje ale aligner nie ma
