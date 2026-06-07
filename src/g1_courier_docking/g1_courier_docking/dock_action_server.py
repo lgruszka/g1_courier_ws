@@ -399,6 +399,12 @@ class DockActionServer(Node):
         within_tol_count = 0
         no_det_count = 0   # consecutive ticks without a valid tag detection
         no_det_recovery_threshold = max(5, int(self._rate_hz))   # ~1 s @ 20 Hz
+        no_det_recovery_max = max(no_det_recovery_threshold + 5,
+                                    int(self._rate_hz * 3))         # ~3 s @ 20 Hz
+        # Po threshold (1s) robot cofa się 5cm/s żeby tag wrócił do FoV. Po
+        # recovery_max (3s łącznie braku detekcji) robot STAJE — dalsze cofanie
+        # nie przyniosło rezultatu, dalsze ruchy mogą być niebezpieczne (np.
+        # uderzenie w ścianę za robotem). Stoi do detekcji lub timeout action.
         # Per-call target_distance for log readability — same resolution as
         # _extract_tag_residual uses internally.
         log_target_m = (
@@ -433,9 +439,9 @@ class DockActionServer(Node):
                 self._err_pub.publish(err_msg)
 
                 no_det_count += 1
-                if no_det_count >= no_det_recovery_threshold:
-                    # Tag lost for >1 s — back up slowly to recover FoV. Robot
-                    # was likely too close (tag at FoV edge) or laterally
+                if no_det_recovery_threshold <= no_det_count < no_det_recovery_max:
+                    # Tag lost for >1s ale <3s — back up slowly to recover FoV.
+                    # Robot was likely too close (tag at FoV edge) or laterally
                     # offset (tag cropped). Backing up shrinks tag in image
                     # so corners come into view, dock loop resumes.
                     recovery_cmd = Twist()
@@ -446,7 +452,15 @@ class DockActionServer(Node):
                             f'[dock_apriltag tag={request.apriltag_id}] no detection '
                             f'for {no_det_count} ticks, recovering (vx=-0.05)')
                 else:
+                    # Albo <1s (zbyt świeży lost — czekaj), albo ≥3s (recovery
+                    # nie przyniosło rezultatu — przerwij dalsze cofanie żeby
+                    # nie uderzyć w przeszkodę za robotem). Stoi, czeka.
                     self._publish_zero()
+                    if no_det_count == no_det_recovery_max:
+                        self.get_logger().warn(
+                            f'[dock_apriltag tag={request.apriltag_id}] recovery '
+                            f'wyczerpane po {no_det_count} ticks (~3s) — robot stoi, '
+                            f'czeka na detekcję lub timeout')
                 time.sleep(period)
                 continue
             no_det_count = 0   # reset on successful detection
