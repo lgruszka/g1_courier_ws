@@ -32,7 +32,7 @@ from rclpy.qos import (
     qos_profile_sensor_data,
 )
 
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, Twist, Vector3Stamped
 from sensor_msgs.msg import CameraInfo, LaserScan
 
 from g1_courier_msgs.action import DockToTable
@@ -244,6 +244,10 @@ class DockActionServer(Node):
         self._settle_samples = int(self.get_parameter('settle_samples').value)
 
         self._cmd_pub = self.create_publisher(Twist, cmd_topic, 10)
+        # Live diagnostic: publikuje (dx, dy, dyaw) co tick servo loop'a, żeby
+        # użytkownik mógł obserwować residuals przez `ros2 topic echo /dock/errors`.
+        # vector.x = dx [m], vector.y = dy [m], vector.z = dyaw [rad].
+        self._err_pub = self.create_publisher(Vector3Stamped, '/dock/errors', 10)
 
         self._tag_lock = threading.Lock()
         self._latest_tags = None
@@ -443,6 +447,15 @@ class DockActionServer(Node):
             if abs(dyaw) < yaw_deadband:
                 dyaw = 0.0
 
+            # Live diagnostic publish — raw residuals (po deadbandzie) na /dock/errors
+            err_msg = Vector3Stamped()
+            err_msg.header.stamp = self.get_clock().now().to_msg()
+            err_msg.header.frame_id = 'base_link'
+            err_msg.vector.x = dx
+            err_msg.vector.y = dy
+            err_msg.vector.z = dyaw
+            self._err_pub.publish(err_msg)
+
             cmd, err = aligner.step(dx, dy, dyaw)
             self._cmd_pub.publish(cmd)
             self._publish_feedback(goal_handle, 'servoing', err)
@@ -624,6 +637,16 @@ class DockActionServer(Node):
                 self._publish_feedback(goal_handle, 'searching', err)
                 time.sleep(period)
                 continue
+
+            # Live diagnostic publish (LIDAR_LINE mode): err.xy_m to signed dx
+            # (forward distance), dy=0 (brak feature lateral), err.yaw_rad to dyaw.
+            err_msg = Vector3Stamped()
+            err_msg.header.stamp = self.get_clock().now().to_msg()
+            err_msg.header.frame_id = 'base_link'
+            err_msg.vector.x = err.xy_m
+            err_msg.vector.y = 0.0
+            err_msg.vector.z = err.yaw_rad
+            self._err_pub.publish(err_msg)
 
             self._cmd_pub.publish(cmd)
             self._publish_feedback(goal_handle, 'servoing', err)
