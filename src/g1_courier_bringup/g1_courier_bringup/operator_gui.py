@@ -64,6 +64,18 @@ from g1_courier_msgs.action import (
     DockToTable, NavigateToPose as CourierNavigate, PickBox, PlaceBox, Retreat,
 )
 from g1_courier_msgs.srv import SetFreeze
+from rcl_interfaces.srv import GetParameters, SetParameters
+from rcl_interfaces.msg import Parameter as ParameterMsg, ParameterType, ParameterValue
+
+# Tunowalne parametry doku APRILTAG (nazwa, etykieta, zakres, krok, domyślny=z docking.yaml)
+DOCK_TUNE_PARAMS = [
+    ('apriltag.kp_xy',           'kp_xy (wzmocnienie x/y)',  0.0, 2.0, 0.05, 0.30),
+    ('apriltag.kp_yaw',          'kp_yaw (wzmocnienie yaw)', 0.0, 5.0, 0.1,  1.20),
+    ('apriltag.max_vx',          'max_vx [m/s] (do przodu)', 0.01, 0.5, 0.01, 0.05),
+    ('apriltag.max_vy',          'max_vy [m/s] (na boki)',   0.0, 0.5, 0.01, 0.10),
+    ('apriltag.max_vyaw',        'max_vyaw [rad/s] (obrót)', 0.0, 2.0, 0.05, 0.40),
+    ('apriltag.yaw_deadband_rad','yaw deadband [rad]',       0.0, 0.5, 0.01, 0.10),
+]
 
 try:
     from unitree_hg.msg import LowState
@@ -86,6 +98,7 @@ class RosBridge(QObject):
     dock_errors_changed = pyqtSignal(float, float, float)          # dx_m, dy_m, dyaw_rad
     cycle_phase_changed = pyqtSignal(str)                          # opis bieżącej fazy cyklu
     cycle_finished = pyqtSignal(bool, str)                         # cykl zatrzymany (ok, powód)
+    dock_params_loaded = pyqtSignal(object)                        # dict name->value (z robota)
 
     def __init__(self) -> None:
         super().__init__()
@@ -113,6 +126,11 @@ class RosBridge(QObject):
         self._cmd_vel_pub = self.node.create_publisher(Twist, '/cmd_vel', 10)
         # Service client dla freeze.
         self._freeze_client = self.node.create_client(SetFreeze, '/safety/set_freeze')
+        # Klienci serwisu parametrów dock_action_server (live-tuning doku).
+        self._dock_set_param = self.node.create_client(
+            SetParameters, '/dock_action_server/set_parameters')
+        self._dock_get_param = self.node.create_client(
+            GetParameters, '/dock_action_server/get_parameters')
 
         # Subscribers — status.
         self.node.create_subscription(
@@ -538,6 +556,54 @@ class RosBridge(QObject):
             self._freeze_client.call_async(req)
             self.log_message.emit('info', 'freeze=false')
 
+    # ---- live tuning doku APRILTAG (serwis parametrów) ----
+
+    def set_dock_params(self, values: dict) -> None:
+        """Ustaw parametry apriltag.* na /dock_action_server (działa od następnego
+        dokowania — aligner czyta je per-dock)."""
+        if not self._dock_set_param.wait_for_service(timeout_sec=1.0):
+            self.log_message.emit('error',
+                'tuning doku: /dock_action_server/set_parameters niedostępny (czy dock chodzi?)')
+            return
+        req = SetParameters.Request()
+        for name, val in values.items():
+            pm = ParameterMsg()
+            pm.name = name
+            pm.value = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(val))
+            req.parameters.append(pm)
+        fut = self._dock_set_param.call_async(req)
+
+        def done(f):
+            try:
+                res = f.result()
+                okn = sum(1 for r in res.results if r.successful)
+                self.log_message.emit('ok', f'tuning doku: zastosowano {okn}/{len(req.parameters)} param')
+            except Exception as exc:
+                self.log_message.emit('error', f'tuning doku: {exc}')
+        fut.add_done_callback(done)
+
+    def load_dock_params(self) -> None:
+        """Pobierz aktualne wartości z /dock_action_server → sygnał dock_params_loaded."""
+        if not self._dock_get_param.wait_for_service(timeout_sec=1.0):
+            self.log_message.emit('error',
+                'tuning doku: /dock_action_server/get_parameters niedostępny')
+            return
+        names = [p[0] for p in DOCK_TUNE_PARAMS]
+        req = GetParameters.Request(); req.names = names
+        fut = self._dock_get_param.call_async(req)
+
+        def done(f):
+            try:
+                res = f.result()
+                out = {}
+                for name, pv in zip(names, res.values):
+                    out[name] = float(pv.double_value)
+                self.dock_params_loaded.emit(out)
+                self.log_message.emit('ok', 'tuning doku: wczytano z robota')
+            except Exception as exc:
+                self.log_message.emit('error', f'tuning doku read: {exc}')
+        fut.add_done_callback(done)
+
     def set_initial_pose(self, x: float, y: float, yaw_rad: float) -> None:
         msg = PoseWithCovarianceStamped()
         msg.header.stamp = self.node.get_clock().now().to_msg()
@@ -603,6 +669,7 @@ class OperatorWindow(QMainWindow):
         bridge.goal_finished.connect(self._reset_dock_err_label)
         bridge.cycle_phase_changed.connect(self._on_cycle_phase)
         bridge.cycle_finished.connect(self._on_cycle_finished)
+        bridge.dock_params_loaded.connect(self._on_dock_params_loaded)
 
     # ----- panele -----
 
@@ -664,6 +731,7 @@ class OperatorWindow(QMainWindow):
         layout.addWidget(self._build_cycle_group())
         layout.addWidget(self._build_navigate_group())
         layout.addWidget(self._build_dock_group())
+        layout.addWidget(self._build_dock_tune_group())
         layout.addWidget(self._build_pick_place_group())
         layout.addWidget(self._build_retreat_group())
         layout.addStretch()
@@ -786,6 +854,28 @@ class OperatorWindow(QMainWindow):
         self.lbl_dock_err = QLabel('(idle)')
         self.lbl_dock_err.setStyleSheet('font-family: monospace; color: #888;')
         layout.addWidget(self.lbl_dock_err, 4, 1, 1, 3)
+        return box
+
+    def _build_dock_tune_group(self) -> QGroupBox:
+        box = QGroupBox('Tuning doku APRILTAG (live → /dock_action_server)')
+        layout = QGridLayout(box)
+        self._dock_tune_spins = {}
+        for i, (name, label, lo, hi, step, default) in enumerate(DOCK_TUNE_PARAMS):
+            sp = QDoubleSpinBox()
+            sp.setRange(lo, hi); sp.setSingleStep(step); sp.setDecimals(3); sp.setValue(default)
+            r, c = divmod(i, 2)
+            layout.addWidget(QLabel(label + ':'), r, c * 2)
+            layout.addWidget(sp, r, c * 2 + 1)
+            self._dock_tune_spins[name] = sp
+
+        nrows = (len(DOCK_TUNE_PARAMS) + 1) // 2
+        btn_read = QPushButton('Wczytaj z robota')
+        btn_read.clicked.connect(self.bridge.load_dock_params)
+        btn_apply = QPushButton('Zastosuj →')
+        btn_apply.setStyleSheet('background-color: #2266aa; color: white;')
+        btn_apply.clicked.connect(self._on_dock_tune_apply)
+        layout.addWidget(btn_read, nrows, 0, 1, 2)
+        layout.addWidget(btn_apply, nrows, 2, 1, 2)
         return box
 
     def _build_pick_place_group(self) -> QGroupBox:
@@ -927,6 +1017,16 @@ class OperatorWindow(QMainWindow):
 
     def _on_amcl(self, x: float, y: float, yaw_deg: float) -> None:
         self.lbl_amcl.setText(f'x={x:+.2f} y={y:+.2f} yaw={yaw_deg:+.0f}°')
+
+    def _on_dock_tune_apply(self) -> None:
+        vals = {name: sp.value() for name, sp in self._dock_tune_spins.items()}
+        self.bridge.set_dock_params(vals)
+
+    def _on_dock_params_loaded(self, vals: object) -> None:
+        for name, v in vals.items():
+            sp = self._dock_tune_spins.get(name)
+            if sp is not None:
+                sp.setValue(float(v))
 
     def _on_cycle_phase(self, phase: str) -> None:
         self.lbl_cycle_phase.setText(phase)
