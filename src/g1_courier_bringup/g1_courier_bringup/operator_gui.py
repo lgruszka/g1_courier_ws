@@ -17,12 +17,16 @@ Wymagania: pip install PyQt5 (opcjonalnie PyQt6)
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
 import threading
 import time
 from typing import Optional
+
+# Plik trwałego zapisu kotwic cyklu (przeżywa restart GUI).
+CYCLE_WP_PATH = os.path.expanduser('~/maps/cycle_waypoints.json')
 
 import yaml
 
@@ -80,6 +84,8 @@ class RosBridge(QObject):
     active_goal_changed = pyqtSignal(str, str)                     # action, info
     goal_finished = pyqtSignal(bool, str)                          # success, message
     dock_errors_changed = pyqtSignal(float, float, float)          # dx_m, dy_m, dyaw_rad
+    cycle_phase_changed = pyqtSignal(str)                          # opis bieżącej fazy cyklu
+    cycle_finished = pyqtSignal(bool, str)                         # cykl zatrzymany (ok, powód)
 
     def __init__(self) -> None:
         super().__init__()
@@ -87,6 +93,10 @@ class RosBridge(QObject):
         self._lock = threading.Lock()
         self._active_goal_handle = None
         self._active_action: Optional[str] = None
+        # Stan cyklu misji.
+        self._last_amcl: Optional[tuple] = None     # (x, y, yaw_rad) najświeższa poza AMCL
+        self._cycle_thread: Optional[threading.Thread] = None
+        self._cycle_stop = threading.Event()
 
         # Action clients.
         self._nav = ActionClient(self.node, CourierNavigate, '/courier/navigate_to_pose')
@@ -135,7 +145,14 @@ class RosBridge(QObject):
         # quaternion → yaw
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        with self._lock:
+            self._last_amcl = (p.position.x, p.position.y, yaw)
         self.amcl_pose_changed.emit(p.position.x, p.position.y, math.degrees(yaw))
+
+    def current_pose(self) -> Optional[tuple]:
+        """Najświeższa poza AMCL (x, y, yaw_rad) albo None — do teachowania kotwic."""
+        with self._lock:
+            return self._last_amcl
 
     def _on_dock_errors(self, msg: Vector3Stamped) -> None:
         self.dock_errors_changed.emit(msg.vector.x, msg.vector.y, msg.vector.z)
@@ -304,6 +321,188 @@ class RosBridge(QObject):
             lambda f: f'traveled={f.distance_traveled_m:.2f}m',
         )
 
+    # ---- cykl misji (synchroniczna orkiestracja w wątku roboczym) ----
+
+    def _exec_sync(self, client, goal, name: str, feedback_fmt=None) -> tuple:
+        """Wyślij goal i ZABLOKUJ aż do wyniku. Zwraca (ok, msg). Executor kręci
+        w osobnym wątku ROS — tu tylko czekamy na Eventy z callbacków."""
+        if self._cycle_stop.is_set():
+            return False, 'stop'
+        self.cycle_phase_changed.emit(name)
+        self.log_message.emit('info', f'[cykl] → {name}')
+        if not client.wait_for_server(timeout_sec=3.0):
+            return False, f'{name}: server niedostępny'
+
+        def fb_cb(fb):
+            if feedback_fmt:
+                try:
+                    txt = feedback_fmt(fb.feedback)
+                    if txt:
+                        self.log_message.emit('fb', f'{name}: {txt}')
+                except Exception:
+                    pass
+
+        send_fut = client.send_goal_async(goal, feedback_callback=fb_cb)
+        ev = threading.Event(); box = {}
+        send_fut.add_done_callback(lambda f: (box.__setitem__('h', f.result()), ev.set()))
+        if not ev.wait(timeout=10.0):
+            return False, f'{name}: brak odpowiedzi serwera'
+        handle = box.get('h')
+        if handle is None or not handle.accepted:
+            return False, f'{name}: REJECTED'
+
+        with self._lock:
+            self._active_goal_handle = handle
+            self._active_action = name
+        self.active_goal_changed.emit(name, '(cykl)')
+
+        res_fut = handle.get_result_async()
+        ev2 = threading.Event(); box2 = {}
+        res_fut.add_done_callback(lambda f: (box2.__setitem__('w', f.result()), ev2.set()))
+        ev2.wait()   # blokuje aż do wyniku LUB cancel (stop_cycle → cancel_active)
+
+        with self._lock:
+            self._active_goal_handle = None
+            self._active_action = None
+        self.active_goal_changed.emit('', '')
+
+        wrap = box2.get('w')
+        if wrap is None:
+            return False, f'{name}: brak wyniku'
+        ok = bool(getattr(wrap.result, 'success', False))
+        msg = getattr(wrap.result, 'message', '') or f'status={wrap.status}'
+        self.log_message.emit('ok' if ok else 'error',
+                              f'[cykl] {name}: {"OK" if ok else "FAIL"} — {msg}')
+        return ok, msg
+
+    @staticmethod
+    def _predock(anchor: tuple, standoff: float) -> tuple:
+        """Cofnij kotwicę (poza przy biurku) o `standoff` wzdłuż osi patrzenia
+        → punkt PRZED biurkiem. yaw bez zmian (dalej twarzą do biurka)."""
+        x, y, yaw = anchor
+        return (x - standoff * math.cos(yaw), y - standoff * math.sin(yaw), yaw)
+
+    def _g_nav(self, x, y, yaw, name):
+        g = CourierNavigate.Goal()
+        g.target_pose.header.frame_id = 'map'
+        g.target_pose.pose.position.x = x
+        g.target_pose.pose.position.y = y
+        g.target_pose.pose.orientation.z = math.sin(yaw / 2.0)
+        g.target_pose.pose.orientation.w = math.cos(yaw / 2.0)
+        g.waypoint_name = name
+        g.timeout_s = 120.0
+        return g
+
+    def _g_dock(self, mode, p):
+        g = DockToTable.Goal()
+        g.mode = mode
+        g.apriltag_id = int(p['tag_id'])
+        if mode == DockToTable.Goal.MODE_APRILTAG:
+            g.target_pose.header.frame_id = f"tag_{int(p['tag_id'])}"
+        else:
+            g.target_pose.header.frame_id = 'map'
+        g.target_pose.pose.position.z = float(p['dock_z'])
+        g.target_pose.pose.orientation.w = 1.0
+        g.xy_tolerance_m = float(p['xy_tol'])
+        g.yaw_tolerance_rad = float(p['yaw_tol'])
+        g.timeout_s = 40.0
+        return g
+
+    def start_cycle(self, params: dict) -> None:
+        if self._cycle_thread is not None and self._cycle_thread.is_alive():
+            self.log_message.emit('warn', 'cykl już aktywny')
+            return
+        self._cycle_stop.clear()
+        self._cycle_thread = threading.Thread(
+            target=self._cycle_loop, args=(params,), daemon=True)
+        self._cycle_thread.start()
+
+    def stop_cycle(self) -> None:
+        if self._cycle_thread is None or not self._cycle_thread.is_alive():
+            return
+        self.log_message.emit('warn', '[cykl] STOP — przerywam po bieżącym kroku')
+        self._cycle_stop.set()
+        self.cancel_active()   # odblokuj _exec_sync czekający na wynik
+
+    def _cycle_loop(self, p: dict) -> None:
+        anchors = {'A': p['anchor_a'], 'B': p['anchor_b']}
+        legs = [('A', 'B'), ('B', 'A')]   # (pobierz, odłóż)
+        ok_all, reason = True, 'zatrzymano przez operatora'
+        try:
+            while not self._cycle_stop.is_set():
+                aborted = False
+                for pick_t, place_t in legs:
+                    if self._cycle_stop.is_set():
+                        break
+                    if not self._run_leg(p, anchors, pick_t, place_t):
+                        ok_all, reason = False, 'krok nieudany — cykl przerwany'
+                        aborted = True
+                        break
+                if aborted:
+                    break
+        finally:
+            self.cycle_finished.emit(ok_all, reason)
+
+    def _run_leg(self, p, anchors, pick_t, place_t) -> bool:
+        st = self._cycle_stop
+        # 1. nav PRZED biurko pick (kotwica - pick_standoff)
+        x, y, yaw = self._predock(anchors[pick_t], p['pick_standoff'])
+        ok, _ = self._exec_sync(self._nav, self._g_nav(x, y, yaw, f'pick_{pick_t}'),
+                                f'nav→{pick_t} (pick {p["pick_standoff"]:.1f}m przed)',
+                                lambda f: f'd={f.distance_remaining_m:.2f}m')
+        if not ok or st.is_set():
+            return False
+        # 2. dok APRILTAG na karton
+        ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_APRILTAG, p),
+                                f'dock APRILTAG @{pick_t}',
+                                lambda f: f'{f.phase} xy={f.xy_error_m:.3f}')
+        if not ok or st.is_set():
+            return False
+        # 3. pick
+        pg = PickBox.Goal(); pg.sequence_name = 'pick_box'; pg.timeout_s = 60.0
+        ok, _ = self._exec_sync(self._pick, pg, f'pick @{pick_t}',
+                                lambda f: f'{f.phase} {f.progress:.0%}')
+        if not ok or st.is_set():
+            return False
+        # 4. clearance retreat (żeby planner wyszedł ze strefy biurka)
+        if p['post_pick'] > 0.01:
+            rg = Retreat.Goal(); rg.distance_m = p['post_pick']
+            rg.speed_mps = p['retreat_speed']; rg.timeout_s = 15.0
+            self._exec_sync(self._retreat, rg, f'clearance {p["post_pick"]:.1f}m')
+            if st.is_set():
+                return False
+        # 5. nav BLISKO biurko place (kotwica - place_standoff)
+        x, y, yaw = self._predock(anchors[place_t], p['place_standoff'])
+        ok, _ = self._exec_sync(self._nav, self._g_nav(x, y, yaw, f'place_{place_t}'),
+                                f'nav→{place_t} (place {p["place_standoff"]:.1f}m przed)',
+                                lambda f: f'd={f.distance_remaining_m:.2f}m')
+        if not ok or st.is_set():
+            return False
+        # 6. metoda odkładania
+        if p['place_method'] == 'lidar':
+            ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_LIDAR_LINE, p),
+                                    f'dock LIDAR @{place_t}',
+                                    lambda f: f'{f.phase} xy={f.xy_error_m:.3f}')
+            if not ok or st.is_set():
+                return False
+        elif p['place_method'] == 'apriltag':
+            ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_APRILTAG, p),
+                                    f'dock APRILTAG @{place_t}',
+                                    lambda f: f'{f.phase} xy={f.xy_error_m:.3f}')
+            if not ok or st.is_set():
+                return False
+        # else 'nav' — bez dokowania, odkładamy z nawigacji
+        plg = PlaceBox.Goal(); plg.timeout_s = 60.0
+        ok, _ = self._exec_sync(self._place, plg, f'place @{place_t}',
+                                lambda f: f'{f.phase} {f.progress:.0%}')
+        if not ok or st.is_set():
+            return False
+        # 7. retreat (parametr z GUI, np. 2m)
+        rg = Retreat.Goal(); rg.distance_m = p['retreat_dist']
+        rg.speed_mps = p['retreat_speed']; rg.timeout_s = 20.0
+        ok, _ = self._exec_sync(self._retreat, rg, f'retreat {p["retreat_dist"]:.1f}m')
+        return ok and not st.is_set()
+
     def cancel_active(self) -> None:
         with self._lock:
             handle = self._active_goal_handle
@@ -315,6 +514,7 @@ class RosBridge(QObject):
 
     def estop(self) -> None:
         # Cancel + zero cmd_vel + freeze service (jeśli dostępny).
+        self._cycle_stop.set()   # zatrzymaj cykl jeśli aktywny (nie tylko bieżący goal)
         self.cancel_active()
         zero = Twist()
         for _ in range(5):
@@ -397,6 +597,8 @@ class OperatorWindow(QMainWindow):
         # Goal end (any action) → reset dock error label do (idle), żeby nie
         # zamrażało się na 'NO TAG' po timeout/abort.
         bridge.goal_finished.connect(self._reset_dock_err_label)
+        bridge.cycle_phase_changed.connect(self._on_cycle_phase)
+        bridge.cycle_finished.connect(self._on_cycle_finished)
 
     # ----- panele -----
 
@@ -455,12 +657,65 @@ class OperatorWindow(QMainWindow):
     def _build_actions_panel(self) -> QWidget:
         outer = QWidget()
         layout = QVBoxLayout(outer)
+        layout.addWidget(self._build_cycle_group())
         layout.addWidget(self._build_navigate_group())
         layout.addWidget(self._build_dock_group())
         layout.addWidget(self._build_pick_place_group())
         layout.addWidget(self._build_retreat_group())
         layout.addStretch()
         return outer
+
+    def _build_cycle_group(self) -> QGroupBox:
+        box = QGroupBox('Cykl misji A↔B (auto)')
+        layout = QGridLayout(box)
+
+        # Kotwice = poza robota PRZY biurku (twarzą do niego). Dystanse niżej
+        # liczone WSTECZ od kotwicy → punkt przed biurkiem.
+        self._anchor_a = None
+        self._anchor_b = None
+        self.lbl_anchor_a = QLabel('A: —'); self.lbl_anchor_a.setFont(QFont('Monospace', 9))
+        self.lbl_anchor_b = QLabel('B: —'); self.lbl_anchor_b.setFont(QFont('Monospace', 9))
+        btn_teach_a = QPushButton('Zapisz A = aktualna poza')
+        btn_teach_a.clicked.connect(lambda: self._on_teach('A'))
+        btn_teach_b = QPushButton('Zapisz B = aktualna poza')
+        btn_teach_b.clicked.connect(lambda: self._on_teach('B'))
+        layout.addWidget(btn_teach_a, 0, 0, 1, 2); layout.addWidget(self.lbl_anchor_a, 0, 2, 1, 2)
+        layout.addWidget(btn_teach_b, 1, 0, 1, 2); layout.addWidget(self.lbl_anchor_b, 1, 2, 1, 2)
+
+        # Parametry standoffów (mierzone wstecz od kotwicy=biurka).
+        self.cyc_pick = QDoubleSpinBox(); self.cyc_pick.setRange(0.2, 3.0); self.cyc_pick.setValue(1.0); self.cyc_pick.setSingleStep(0.1); self.cyc_pick.setDecimals(2)
+        self.cyc_place = QDoubleSpinBox(); self.cyc_place.setRange(0.0, 2.0); self.cyc_place.setValue(0.2); self.cyc_place.setSingleStep(0.05); self.cyc_place.setDecimals(2)
+        self.cyc_retreat = QDoubleSpinBox(); self.cyc_retreat.setRange(0.1, 3.0); self.cyc_retreat.setValue(2.0); self.cyc_retreat.setSingleStep(0.1); self.cyc_retreat.setDecimals(1)
+        self.cyc_postpick = QDoubleSpinBox(); self.cyc_postpick.setRange(0.0, 1.5); self.cyc_postpick.setValue(0.5); self.cyc_postpick.setSingleStep(0.1); self.cyc_postpick.setDecimals(1)
+        layout.addWidget(QLabel('pick (m przed):'), 2, 0); layout.addWidget(self.cyc_pick, 2, 1)
+        layout.addWidget(QLabel('place (m przed):'), 2, 2); layout.addWidget(self.cyc_place, 2, 3)
+        layout.addWidget(QLabel('retreat [m]:'), 3, 0); layout.addWidget(self.cyc_retreat, 3, 1)
+        layout.addWidget(QLabel('clearance po pick [m]:'), 3, 2); layout.addWidget(self.cyc_postpick, 3, 3)
+
+        self.cyc_tag = QSpinBox(); self.cyc_tag.setRange(0, 99); self.cyc_tag.setValue(10)
+        self.cyc_place_method = QComboBox()
+        self.cyc_place_method.addItem('nav blisko (bez doku)', 'nav')
+        self.cyc_place_method.addItem('dok LIDAR_LINE', 'lidar')
+        self.cyc_place_method.addItem('dok APRILTAG', 'apriltag')
+        layout.addWidget(QLabel('tag_id:'), 4, 0); layout.addWidget(self.cyc_tag, 4, 1)
+        layout.addWidget(QLabel('place:'), 4, 2); layout.addWidget(self.cyc_place_method, 4, 3)
+
+        self.btn_cycle_start = QPushButton('▶ START CYKL')
+        self.btn_cycle_start.setStyleSheet('background-color: #117711; color: white; font-weight: bold; padding: 8px;')
+        self.btn_cycle_start.clicked.connect(self._on_cycle_start)
+        self.btn_cycle_stop = QPushButton('■ STOP CYKL')
+        self.btn_cycle_stop.setStyleSheet('background-color: #883333; color: white; padding: 8px;')
+        self.btn_cycle_stop.clicked.connect(self.bridge.stop_cycle)
+        self.btn_cycle_stop.setEnabled(False)
+        layout.addWidget(self.btn_cycle_start, 5, 0, 1, 2)
+        layout.addWidget(self.btn_cycle_stop, 5, 2, 1, 2)
+
+        self.lbl_cycle_phase = QLabel('(bezczynny)')
+        self.lbl_cycle_phase.setStyleSheet('font-family: monospace; color: #888;')
+        layout.addWidget(QLabel('faza:'), 6, 0); layout.addWidget(self.lbl_cycle_phase, 6, 1, 1, 3)
+
+        self._load_anchors()
+        return box
 
     def _build_navigate_group(self) -> QGroupBox:
         box = QGroupBox('Navigate')
@@ -596,10 +851,83 @@ class OperatorWindow(QMainWindow):
             math.radians(self.ip_yaw.value()),
         )
 
+    # ----- cykl: teach + start/stop -----
+
+    def _fmt_anchor(self, a) -> str:
+        if a is None:
+            return '—'
+        return f'x={a[0]:+.2f} y={a[1]:+.2f} yaw={math.degrees(a[2]):+.0f}°'
+
+    def _on_teach(self, which: str) -> None:
+        pose = self.bridge.current_pose()
+        if pose is None:
+            self.bridge.log_message.emit('error', 'teach: brak /amcl_pose — czy AMCL zlokalizowany?')
+            return
+        if which == 'A':
+            self._anchor_a = pose
+            self.lbl_anchor_a.setText(f'A: {self._fmt_anchor(pose)}')
+        else:
+            self._anchor_b = pose
+            self.lbl_anchor_b.setText(f'B: {self._fmt_anchor(pose)}')
+        self.bridge.log_message.emit('ok', f'kotwica {which} = {self._fmt_anchor(pose)} (PRZY biurku)')
+        self._save_anchors()
+
+    def _save_anchors(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(CYCLE_WP_PATH), exist_ok=True)
+            with open(CYCLE_WP_PATH, 'w') as f:
+                json.dump({'A': self._anchor_a, 'B': self._anchor_b}, f)
+        except Exception as exc:
+            self.bridge.log_message.emit('warn', f'zapis kotwic nieudany: {exc}')
+
+    def _load_anchors(self) -> None:
+        try:
+            with open(CYCLE_WP_PATH) as f:
+                d = json.load(f)
+            if d.get('A'):
+                self._anchor_a = tuple(d['A']); self.lbl_anchor_a.setText(f'A: {self._fmt_anchor(self._anchor_a)}')
+            if d.get('B'):
+                self._anchor_b = tuple(d['B']); self.lbl_anchor_b.setText(f'B: {self._fmt_anchor(self._anchor_b)}')
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            self.bridge.log_message.emit('warn', f'wczytanie kotwic nieudane: {exc}')
+
+    def _on_cycle_start(self) -> None:
+        if self._anchor_a is None or self._anchor_b is None:
+            self.bridge.log_message.emit('error', 'cykl: zapisz najpierw kotwice A i B')
+            return
+        params = {
+            'anchor_a': self._anchor_a, 'anchor_b': self._anchor_b,
+            'pick_standoff': self.cyc_pick.value(),
+            'place_standoff': self.cyc_place.value(),
+            'retreat_dist': self.cyc_retreat.value(),
+            'retreat_speed': 0.12,
+            'post_pick': self.cyc_postpick.value(),
+            'tag_id': self.cyc_tag.value(),
+            'dock_z': 0.30, 'xy_tol': 0.05, 'yaw_tol': 0.10,
+            'place_method': self.cyc_place_method.currentData(),
+        }
+        self.btn_cycle_start.setEnabled(False)
+        self.btn_cycle_stop.setEnabled(True)
+        self.bridge.log_message.emit('ok', '[cykl] START')
+        self.bridge.start_cycle(params)
+
     # ----- ROS bridge slots -----
 
     def _on_amcl(self, x: float, y: float, yaw_deg: float) -> None:
         self.lbl_amcl.setText(f'x={x:+.2f} y={y:+.2f} yaw={yaw_deg:+.0f}°')
+
+    def _on_cycle_phase(self, phase: str) -> None:
+        self.lbl_cycle_phase.setText(phase)
+        self.lbl_cycle_phase.setStyleSheet('font-family: monospace; color: #117711; font-weight: bold;')
+
+    def _on_cycle_finished(self, ok: bool, reason: str) -> None:
+        self.btn_cycle_start.setEnabled(True)
+        self.btn_cycle_stop.setEnabled(False)
+        self.lbl_cycle_phase.setText(f'koniec: {reason}')
+        self.lbl_cycle_phase.setStyleSheet(
+            f'font-family: monospace; color: {"#888" if ok else "#cc2222"};')
 
     def _reset_dock_err_label(self, _ok: bool, _msg: str) -> None:
         """Reset dock errors label do '(idle)' po zakończeniu dowolnego action.
