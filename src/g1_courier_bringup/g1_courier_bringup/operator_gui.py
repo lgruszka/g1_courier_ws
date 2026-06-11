@@ -393,7 +393,9 @@ class RosBridge(QObject):
         g.timeout_s = 120.0
         return g
 
-    def _g_dock(self, mode, p):
+    def _g_dock(self, mode, p, target_dist):
+        """target_dist = odległość zbieżności od tagu/krawędzi [m].
+        0.0 => dock użyje wartości z docking.yaml (tuned per-tryb)."""
         g = DockToTable.Goal()
         g.mode = mode
         g.apriltag_id = int(p['tag_id'])
@@ -401,7 +403,7 @@ class RosBridge(QObject):
             g.target_pose.header.frame_id = f"tag_{int(p['tag_id'])}"
         else:
             g.target_pose.header.frame_id = 'map'
-        g.target_pose.pose.position.z = float(p['dock_z'])
+        g.target_pose.pose.position.z = float(target_dist)   # >0 override; 0 => config
         g.target_pose.pose.orientation.w = 1.0
         g.xy_tolerance_m = float(p['xy_tol'])
         g.yaw_tolerance_rad = float(p['yaw_tol'])
@@ -452,9 +454,10 @@ class RosBridge(QObject):
                                 lambda f: f'd={f.distance_remaining_m:.2f}m')
         if not ok or st.is_set():
             return False
-        # 2. dok APRILTAG na karton
-        ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_APRILTAG, p),
-                                f'dock APRILTAG @{pick_t}',
+        # 2. dok APRILTAG na karton — zbiega do dock_dist (grasp, np. 0.17m)
+        ok, _ = self._exec_sync(self._dock,
+                                self._g_dock(DockToTable.Goal.MODE_APRILTAG, p, p['dock_dist']),
+                                f'dock APRILTAG @{pick_t} → {p["dock_dist"]:.2f}m od tagu',
                                 lambda f: f'{f.phase} xy={f.xy_error_m:.3f}')
         if not ok or st.is_set():
             return False
@@ -478,15 +481,16 @@ class RosBridge(QObject):
                                 lambda f: f'd={f.distance_remaining_m:.2f}m')
         if not ok or st.is_set():
             return False
-        # 6. metoda odkładania
+        # 6. metoda odkładania — dok używa odległości z docking.yaml (z=0 => config:
+        #    lidar.target_distance_m / apriltag.target_distance_m, już tuned per-tryb)
         if p['place_method'] == 'lidar':
-            ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_LIDAR_LINE, p),
+            ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_LIDAR_LINE, p, 0.0),
                                     f'dock LIDAR @{place_t}',
                                     lambda f: f'{f.phase} xy={f.xy_error_m:.3f}')
             if not ok or st.is_set():
                 return False
         elif p['place_method'] == 'apriltag':
-            ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_APRILTAG, p),
+            ok, _ = self._exec_sync(self._dock, self._g_dock(DockToTable.Goal.MODE_APRILTAG, p, 0.0),
                                     f'dock APRILTAG @{place_t}',
                                     lambda f: f'{f.phase} xy={f.xy_error_m:.3f}')
             if not ok or st.is_set():
@@ -693,12 +697,17 @@ class OperatorWindow(QMainWindow):
         layout.addWidget(QLabel('clearance po pick [m]:'), 3, 2); layout.addWidget(self.cyc_postpick, 3, 3)
 
         self.cyc_tag = QSpinBox(); self.cyc_tag.setRange(0, 99); self.cyc_tag.setValue(10)
+        # Odległość zbieżności doku od tagu kartonu przy PICK (grasp). Domyślnie
+        # 0.17m = palm-press z docking.yaml. To jest realny dystans do KTÓREGO
+        # robot podjedzie w dokowaniu (nie kotwica, nie standoff).
+        self.cyc_dock_dist = QDoubleSpinBox(); self.cyc_dock_dist.setRange(0.08, 1.0); self.cyc_dock_dist.setValue(0.17); self.cyc_dock_dist.setSingleStep(0.01); self.cyc_dock_dist.setDecimals(2)
         self.cyc_place_method = QComboBox()
         self.cyc_place_method.addItem('nav blisko (bez doku)', 'nav')
         self.cyc_place_method.addItem('dok LIDAR_LINE', 'lidar')
         self.cyc_place_method.addItem('dok APRILTAG', 'apriltag')
         layout.addWidget(QLabel('tag_id:'), 4, 0); layout.addWidget(self.cyc_tag, 4, 1)
-        layout.addWidget(QLabel('place:'), 4, 2); layout.addWidget(self.cyc_place_method, 4, 3)
+        layout.addWidget(QLabel('dok: odl. od tagu [m]:'), 4, 2); layout.addWidget(self.cyc_dock_dist, 4, 3)
+        layout.addWidget(QLabel('place:'), 5, 0); layout.addWidget(self.cyc_place_method, 5, 1, 1, 3)
 
         self.btn_cycle_start = QPushButton('▶ START CYKL')
         self.btn_cycle_start.setStyleSheet('background-color: #117711; color: white; font-weight: bold; padding: 8px;')
@@ -707,12 +716,12 @@ class OperatorWindow(QMainWindow):
         self.btn_cycle_stop.setStyleSheet('background-color: #883333; color: white; padding: 8px;')
         self.btn_cycle_stop.clicked.connect(self.bridge.stop_cycle)
         self.btn_cycle_stop.setEnabled(False)
-        layout.addWidget(self.btn_cycle_start, 5, 0, 1, 2)
-        layout.addWidget(self.btn_cycle_stop, 5, 2, 1, 2)
+        layout.addWidget(self.btn_cycle_start, 6, 0, 1, 2)
+        layout.addWidget(self.btn_cycle_stop, 6, 2, 1, 2)
 
         self.lbl_cycle_phase = QLabel('(bezczynny)')
         self.lbl_cycle_phase.setStyleSheet('font-family: monospace; color: #888;')
-        layout.addWidget(QLabel('faza:'), 6, 0); layout.addWidget(self.lbl_cycle_phase, 6, 1, 1, 3)
+        layout.addWidget(QLabel('faza:'), 7, 0); layout.addWidget(self.lbl_cycle_phase, 7, 1, 1, 3)
 
         self._load_anchors()
         return box
@@ -905,7 +914,8 @@ class OperatorWindow(QMainWindow):
             'retreat_speed': 0.12,
             'post_pick': self.cyc_postpick.value(),
             'tag_id': self.cyc_tag.value(),
-            'dock_z': 0.30, 'xy_tol': 0.05, 'yaw_tol': 0.10,
+            'dock_dist': self.cyc_dock_dist.value(),   # odl. od tagu przy pick (grasp)
+            'xy_tol': 0.05, 'yaw_tol': 0.10,
             'place_method': self.cyc_place_method.currentData(),
         }
         self.btn_cycle_start.setEnabled(False)
