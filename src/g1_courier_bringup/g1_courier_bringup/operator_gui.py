@@ -77,6 +77,16 @@ DOCK_TUNE_PARAMS = [
     ('apriltag.yaw_deadband_rad','yaw deadband [rad]',       0.0, 0.5, 0.01, 0.10),
 ]
 
+# Granice cropboxa wycinania paczki (base_link, przód=+x) — /parcel_cloud_filter
+PARCEL_FILTER_PARAMS = [
+    ('box_x_min', 'x min [m] (przód od)',  0.0,  1.0, 0.01,  0.10),
+    ('box_x_max', 'x max [m] (przód do)',  0.0,  1.5, 0.01,  0.45),
+    ('box_y_min', 'y min [m] (prawo)',    -1.0,  0.0, 0.01, -0.25),
+    ('box_y_max', 'y max [m] (lewo)',      0.0,  1.0, 0.01,  0.25),
+    ('box_z_min', 'z min [m] (dół)',      -2.0,  0.0, 0.05, -1.00),
+    ('box_z_max', 'z max [m] (góra)',      0.0,  2.0, 0.05,  1.00),
+]
+
 try:
     from unitree_hg.msg import LowState
     HAVE_LOWSTATE = True
@@ -99,6 +109,7 @@ class RosBridge(QObject):
     cycle_phase_changed = pyqtSignal(str)                          # opis bieżącej fazy cyklu
     cycle_finished = pyqtSignal(bool, str)                         # cykl zatrzymany (ok, powód)
     dock_params_loaded = pyqtSignal(object)                        # dict name->value (z robota)
+    parcel_params_loaded = pyqtSignal(object)                      # dict cropbox z /parcel_cloud_filter
 
     def __init__(self) -> None:
         super().__init__()
@@ -131,6 +142,11 @@ class RosBridge(QObject):
             SetParameters, '/dock_action_server/set_parameters')
         self._dock_get_param = self.node.create_client(
             GetParameters, '/dock_action_server/get_parameters')
+        # Klienci dla parcel_cloud_filter (live-tuning cropboxa wycinania paczki).
+        self._parcel_set_param = self.node.create_client(
+            SetParameters, '/parcel_cloud_filter/set_parameters')
+        self._parcel_get_param = self.node.create_client(
+            GetParameters, '/parcel_cloud_filter/get_parameters')
 
         # Subscribers — status.
         self.node.create_subscription(
@@ -558,12 +574,10 @@ class RosBridge(QObject):
 
     # ---- live tuning doku APRILTAG (serwis parametrów) ----
 
-    def set_dock_params(self, values: dict) -> None:
-        """Ustaw parametry apriltag.* na /dock_action_server (działa od następnego
-        dokowania — aligner czyta je per-dock)."""
-        if not self._dock_set_param.wait_for_service(timeout_sec=1.0):
-            self.log_message.emit('error',
-                'tuning doku: /dock_action_server/set_parameters niedostępny (czy dock chodzi?)')
+    def _svc_set_params(self, client, label: str, values: dict) -> None:
+        """Generyczne: ustaw parametry DOUBLE na dowolnym node przez SetParameters."""
+        if not client.wait_for_service(timeout_sec=1.0):
+            self.log_message.emit('error', f'{label}: serwis set_parameters niedostępny (czy node chodzi?)')
             return
         req = SetParameters.Request()
         for name, val in values.items():
@@ -571,38 +585,51 @@ class RosBridge(QObject):
             pm.name = name
             pm.value = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(val))
             req.parameters.append(pm)
-        fut = self._dock_set_param.call_async(req)
+        fut = client.call_async(req)
 
         def done(f):
             try:
                 res = f.result()
                 okn = sum(1 for r in res.results if r.successful)
-                self.log_message.emit('ok', f'tuning doku: zastosowano {okn}/{len(req.parameters)} param')
+                self.log_message.emit('ok', f'{label}: zastosowano {okn}/{len(req.parameters)} param')
             except Exception as exc:
-                self.log_message.emit('error', f'tuning doku: {exc}')
+                self.log_message.emit('error', f'{label}: {exc}')
         fut.add_done_callback(done)
 
-    def load_dock_params(self) -> None:
-        """Pobierz aktualne wartości z /dock_action_server → sygnał dock_params_loaded."""
-        if not self._dock_get_param.wait_for_service(timeout_sec=1.0):
-            self.log_message.emit('error',
-                'tuning doku: /dock_action_server/get_parameters niedostępny')
+    def _svc_get_params(self, client, label: str, names, signal) -> None:
+        """Generyczne: pobierz parametry DOUBLE i wyemituj dict przez `signal`."""
+        if not client.wait_for_service(timeout_sec=1.0):
+            self.log_message.emit('error', f'{label}: serwis get_parameters niedostępny')
             return
-        names = [p[0] for p in DOCK_TUNE_PARAMS]
-        req = GetParameters.Request(); req.names = names
-        fut = self._dock_get_param.call_async(req)
+        req = GetParameters.Request(); req.names = list(names)
+        fut = client.call_async(req)
 
         def done(f):
             try:
                 res = f.result()
-                out = {}
-                for name, pv in zip(names, res.values):
-                    out[name] = float(pv.double_value)
-                self.dock_params_loaded.emit(out)
-                self.log_message.emit('ok', 'tuning doku: wczytano z robota')
+                out = {n: float(pv.double_value) for n, pv in zip(names, res.values)}
+                signal.emit(out)
+                self.log_message.emit('ok', f'{label}: wczytano z robota')
             except Exception as exc:
-                self.log_message.emit('error', f'tuning doku read: {exc}')
+                self.log_message.emit('error', f'{label} read: {exc}')
         fut.add_done_callback(done)
+
+    def set_dock_params(self, values: dict) -> None:
+        """apriltag.* na /dock_action_server (działa od następnego dokowania)."""
+        self._svc_set_params(self._dock_set_param, 'tuning doku', values)
+
+    def set_parcel_params(self, values: dict) -> None:
+        """cropbox na /parcel_cloud_filter (działa natychmiast)."""
+        self._svc_set_params(self._parcel_set_param, 'cropbox paczki', values)
+
+    def load_parcel_params(self) -> None:
+        self._svc_get_params(self._parcel_get_param, 'cropbox paczki',
+                             [p[0] for p in PARCEL_FILTER_PARAMS], self.parcel_params_loaded)
+
+    def load_dock_params(self) -> None:
+        """Pobierz aktualne apriltag.* z /dock_action_server → dock_params_loaded."""
+        self._svc_get_params(self._dock_get_param, 'tuning doku',
+                             [p[0] for p in DOCK_TUNE_PARAMS], self.dock_params_loaded)
 
     def set_initial_pose(self, x: float, y: float, yaw_rad: float) -> None:
         msg = PoseWithCovarianceStamped()
@@ -670,6 +697,7 @@ class OperatorWindow(QMainWindow):
         bridge.cycle_phase_changed.connect(self._on_cycle_phase)
         bridge.cycle_finished.connect(self._on_cycle_finished)
         bridge.dock_params_loaded.connect(self._on_dock_params_loaded)
+        bridge.parcel_params_loaded.connect(self._on_parcel_params_loaded)
 
     # ----- panele -----
 
@@ -732,6 +760,7 @@ class OperatorWindow(QMainWindow):
         layout.addWidget(self._build_navigate_group())
         layout.addWidget(self._build_dock_group())
         layout.addWidget(self._build_dock_tune_group())
+        layout.addWidget(self._build_parcel_filter_group())
         layout.addWidget(self._build_pick_place_group())
         layout.addWidget(self._build_retreat_group())
         layout.addStretch()
@@ -874,6 +903,28 @@ class OperatorWindow(QMainWindow):
         btn_apply = QPushButton('Zastosuj →')
         btn_apply.setStyleSheet('background-color: #2266aa; color: white;')
         btn_apply.clicked.connect(self._on_dock_tune_apply)
+        layout.addWidget(btn_read, nrows, 0, 1, 2)
+        layout.addWidget(btn_apply, nrows, 2, 1, 2)
+        return box
+
+    def _build_parcel_filter_group(self) -> QGroupBox:
+        box = QGroupBox('Wycinanie paczki ze skanu (live → /parcel_cloud_filter)')
+        layout = QGridLayout(box)
+        self._parcel_spins = {}
+        for i, (name, label, lo, hi, step, default) in enumerate(PARCEL_FILTER_PARAMS):
+            sp = QDoubleSpinBox()
+            sp.setRange(lo, hi); sp.setSingleStep(step); sp.setDecimals(2); sp.setValue(default)
+            r, c = divmod(i, 2)
+            layout.addWidget(QLabel(label + ':'), r, c * 2)
+            layout.addWidget(sp, r, c * 2 + 1)
+            self._parcel_spins[name] = sp
+
+        nrows = (len(PARCEL_FILTER_PARAMS) + 1) // 2
+        btn_read = QPushButton('Wczytaj z robota')
+        btn_read.clicked.connect(self.bridge.load_parcel_params)
+        btn_apply = QPushButton('Zastosuj →')
+        btn_apply.setStyleSheet('background-color: #2266aa; color: white;')
+        btn_apply.clicked.connect(self._on_parcel_apply)
         layout.addWidget(btn_read, nrows, 0, 1, 2)
         layout.addWidget(btn_apply, nrows, 2, 1, 2)
         return box
@@ -1025,6 +1076,16 @@ class OperatorWindow(QMainWindow):
     def _on_dock_params_loaded(self, vals: object) -> None:
         for name, v in vals.items():
             sp = self._dock_tune_spins.get(name)
+            if sp is not None:
+                sp.setValue(float(v))
+
+    def _on_parcel_apply(self) -> None:
+        vals = {name: sp.value() for name, sp in self._parcel_spins.items()}
+        self.bridge.set_parcel_params(vals)
+
+    def _on_parcel_params_loaded(self, vals: object) -> None:
+        for name, v in vals.items():
+            sp = self._parcel_spins.get(name)
             if sp is not None:
                 sp.setValue(float(v))
 
