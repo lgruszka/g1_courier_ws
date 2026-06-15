@@ -60,14 +60,10 @@ class ParcelCloudFilter(Node):
         self.declare_parameter('box_z_max', 1.0)
 
         self.target_frame = str(self.get_parameter('target_frame').value)
-        self.box = (
-            float(self.get_parameter('box_x_min').value),
-            float(self.get_parameter('box_x_max').value),
-            float(self.get_parameter('box_y_min').value),
-            float(self.get_parameter('box_y_max').value),
-            float(self.get_parameter('box_z_min').value),
-            float(self.get_parameter('box_z_max').value),
-        )
+        self._read_box()
+        # Live-tuning: gdy GUI/ros2 param set zmieni granice → zaktualizuj self.box
+        # natychmiast (bez restartu). Bez tego filtr czytałby je tylko przy starcie.
+        self.add_on_set_parameters_callback(self._on_set_params)
         cloud_in = str(self.get_parameter('cloud_in').value)
         cloud_out = str(self.get_parameter('cloud_out').value)
 
@@ -81,6 +77,23 @@ class ParcelCloudFilter(Node):
             f'parcel_cloud_filter: {cloud_in} -> {cloud_out}, cropbox base_link '
             f'x[{self.box[0]:.2f},{self.box[1]:.2f}] y[{self.box[2]:.2f},{self.box[3]:.2f}] '
             f'z[{self.box[4]:.2f},{self.box[5]:.2f}]')
+
+    _BOX_KEYS = ('box_x_min', 'box_x_max', 'box_y_min', 'box_y_max', 'box_z_min', 'box_z_max')
+
+    def _read_box(self) -> None:
+        self.box = tuple(float(self.get_parameter(k).value) for k in self._BOX_KEYS)
+
+    def _on_set_params(self, params):
+        """Callback set_parameters — zaktualizuj cropbox na żywo."""
+        from rcl_interfaces.msg import SetParametersResult
+        overrides = {p.name: float(p.value) for p in params if p.name in self._BOX_KEYS}
+        if overrides:
+            self.box = tuple(
+                overrides.get(k, self.box[i]) for i, k in enumerate(self._BOX_KEYS))
+            self.get_logger().info(
+                f'cropbox live update: x[{self.box[0]:.2f},{self.box[1]:.2f}] '
+                f'y[{self.box[2]:.2f},{self.box[3]:.2f}] z[{self.box[4]:.2f},{self.box[5]:.2f}]')
+        return SetParametersResult(successful=True)
 
     def _x_off(self, msg):
         off = {f.name: f.offset for f in msg.fields}
