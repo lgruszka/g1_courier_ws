@@ -34,7 +34,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction, TimerAction
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node, SetRemap
@@ -108,6 +108,10 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('enable_mission', default_value='true',
             description='Start mission_node (BT). Set false for nav-only smoke '
                         'tests where you send manual goals from RViz.'),
+        DeclareLaunchArgument('filter_parcel', default_value='true',
+            description='Wstaw parcel_cloud_filter (wycina bryłę niesionej paczki '
+                        'z chmury przed pointcloud_to_laserscan, by nie psuła /scan '
+                        'i AMCL). Set false by wyłączyć.'),
         DeclareLaunchArgument(
             'nav2_start_delay',
             default_value='1.0',
@@ -163,12 +167,26 @@ def generate_launch_description() -> LaunchDescription:
             ],
         ),
 
-        # Sensors -> 2D scan. Bumped input_queue_size from default 10 —
-        # Livox publishes large clouds; default queue overruns under TF
-        # lookup latency.
+        # Parcel cloud filter — wycina bryłę niesionej paczki z chmury żeby nie
+        # psuła /scan i AMCL. Gdy filter_parcel=true, pointcloud_to_laserscan
+        # czyta /livox/lidar_filtered; gdy false, czyta cloud_topic wprost.
+        # Wszystko w TimerAction (czeka aż static TF base_link<-lidar gotowe).
         TimerAction(
             period=LaunchConfiguration('pointcloud_start_delay'),
             actions=[
+                # filtr (tylko gdy filter_parcel)
+                Node(
+                    package='g1_courier_bringup',
+                    executable='parcel_cloud_filter',
+                    name='parcel_cloud_filter',
+                    parameters=[{
+                        'cloud_in': LaunchConfiguration('cloud_topic'),
+                        'cloud_out': '/livox/lidar_filtered',
+                        'target_frame': 'base_link',
+                    }],
+                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
+                ),
+                # p2l z filtrem
                 Node(
                     package='pointcloud_to_laserscan',
                     executable='pointcloud_to_laserscan_node',
@@ -177,8 +195,20 @@ def generate_launch_description() -> LaunchDescription:
                         os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
                         {'queue_size': 50},
                     ],
-                    remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
-                                ('scan', '/scan')],
+                    remappings=[('cloud_in', '/livox/lidar_filtered'), ('scan', '/scan')],
+                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
+                ),
+                # p2l bez filtra (cloud_topic wprost)
+                Node(
+                    package='pointcloud_to_laserscan',
+                    executable='pointcloud_to_laserscan_node',
+                    name='pointcloud_to_laserscan',
+                    parameters=[
+                        os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
+                        {'queue_size': 50},
+                    ],
+                    remappings=[('cloud_in', LaunchConfiguration('cloud_topic')), ('scan', '/scan')],
+                    condition=UnlessCondition(LaunchConfiguration('filter_parcel')),
                 ),
             ],
         ),
