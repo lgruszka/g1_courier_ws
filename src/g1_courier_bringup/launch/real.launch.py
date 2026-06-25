@@ -117,7 +117,10 @@ def generate_launch_description() -> LaunchDescription:
             default_value='1.0',
             description='Delay (s) before starting Nav2 so odom->base TF and first sensor data are available.',
         ),
-
+        DeclareLaunchArgument('enable_camera', default_value='false',
+            description='Odpal d435i_node (RealSense D435i RGB+depth) plus pokaż '
+                        '/camera/image_raw w RViz Image display. Default false.'),
+                        
         # robot_state_publisher: TF from base_link to every URDF link.
         # Gated on enable_robot_model — set false if URDF missing.
         Node(
@@ -237,6 +240,13 @@ def generate_launch_description() -> LaunchDescription:
                 ('image_rect', '/camera/color/image_raw'),
                 ('camera_info', '/camera/color/camera_info'),
             ],
+        ),
+        Node(
+            package='g1_courier_bringup',
+            executable='d435i_node',
+            name='d435i_node',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('enable_camera')),
         ),
 
         # Nav2 (planner, controller, BT navigator, AMCL). SetRemap forces
