@@ -166,7 +166,7 @@ class RosBridge(QObject):
         if HAVE_LOWSTATE:
             self._lowstate_count = 0
             self._lowstate_t0 = time.monotonic()
-            self.node.create_subscription(LowState, '/lowstate', self._on_lowstate, 10)
+            self.node.create_subscription(LowState, '/lf/lowstate', self._on_lowstate, 10)
 
         # Timer Hz reporting (co 2 s).
         self._hz_timer = self.node.create_timer(2.0, self._report_hz)
@@ -715,7 +715,7 @@ class OperatorWindow(QMainWindow):
 
         layout.addRow('AMCL pose:', self.lbl_amcl)
         layout.addRow('/scan Hz:', self.lbl_scan)
-        layout.addRow('/lowstate Hz:', self.lbl_lowstate)
+        layout.addRow('/lf/lowstate Hz:', self.lbl_lowstate)
         layout.addRow('Active goal:', self.lbl_active)
 
         # Initial pose section.

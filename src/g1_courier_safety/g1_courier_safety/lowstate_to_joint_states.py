@@ -66,7 +66,7 @@ DEFAULT_JOINT_NAMES: List[str] = [
 class LowStateToJointStates(Node):
     def __init__(self) -> None:
         super().__init__('lowstate_to_joint_states')
-        self.declare_parameter('lowstate_topic', '/lowstate')
+        self.declare_parameter('lowstate_topic', '/lf/lowstate')
         self.declare_parameter('joint_states_topic', '/joint_states')
         # Comma-separated override for non-G1-29DoF; empty = use DEFAULT_JOINT_NAMES.
         self.declare_parameter('joint_names_csv', '')

@@ -21,7 +21,7 @@ class PickActionServer(Node):
         super().__init__('pick_action_server')
 
         self.declare_parameter('arm_sdk_topic', '/arm_sdk')
-        self.declare_parameter('lowstate_topic', '/lowstate')
+        self.declare_parameter('lowstate_topic', '/lf/lowstate')
         self.declare_parameter('grasp_tau_threshold_nm', 1.5)
         self.declare_parameter('control_dt_s', 0.02)
         self.declare_parameter('kp', 80.0)

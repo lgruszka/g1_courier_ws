@@ -41,7 +41,7 @@ class LowStateInspector(Node):
         self._count = 0
         self._first_msg_time = None
         self._latest: LowState | None = None
-        self.create_subscription(LowState, '/lowstate', self._on, 10)
+        self.create_subscription(LowState, '/lf/lowstate', self._on, 10)
 
     def _on(self, msg: LowState) -> None:
         self._count += 1
