@@ -300,3 +300,126 @@ Praktyczna interpretacja:
 
 - jeśli celem jest poprawa jakości nawigacji, największy zwrot prawdopodobnie da odciążenie hosta z nodów niezwiązanych z bazową nawigacją oraz zbicie częstotliwości `odom/lowstate/tf`
 - strojenie samych parametrów Nav2 powinno być dopiero kolejnym etapem
+
+## 15. Zmiana `/lowstate` -> `/lf/lowstate`
+
+Po pierwszym raporcie wykonano zmianę źródła `LowState` na `/lf/lowstate`.
+
+Potwierdzone odbiorniki `/lf/lowstate`:
+
+- `lowstate_to_joint_states`
+- `pick_action_server`
+- `place_action_server`
+
+Pośrednia ścieżka do TF nadal istnieje:
+
+- `/lf/lowstate` -> `lowstate_to_joint_states` -> `/joint_states`
+- `/joint_states` -> `robot_state_publisher` -> `/tf`
+
+To oznacza:
+
+- `/lf/lowstate` nadal nie jest wejściem bezpośrednio do Nav2
+- ale pośrednio wpływa na obciążenie przez `joint_states` i `robot_state_publisher`
+
+## 16. Porównanie przed i po zmianie
+
+### 16.1 Porównanie CPU
+
+Porównanie snapshotów wykonanych na tym samym hoście, dla stosu uruchomionego z `run_nav2.sh`.
+
+Przed zmianą:
+
+- `lowstate_to_joint_states`: ok. 69-71% CPU
+- `pick_action_server`: ok. 80-81% CPU
+- `place_action_server`: ok. 79-80% CPU
+- `robot_state_publisher`: ok. 9.8-9.9% CPU
+- `odom_tf_relay`: ok. 68-69% CPU
+- `nav2_container`: ok. 59%
+
+Po zmianie:
+
+- `lowstate_to_joint_states`: ok. 9.8% CPU
+- `pick_action_server`: ok. 9.7% CPU
+- `place_action_server`: ok. 9.8% CPU
+- `robot_state_publisher`: ok. 5.1% CPU
+- `odom_tf_relay`: ok. 82.4% CPU
+- `nav2_container`: ok. 63.6%
+
+Różnica:
+
+- `lowstate_to_joint_states`: spadek o ok. 60 punktów procentowych
+- `pick_action_server`: spadek o ok. 70 punktów procentowych
+- `place_action_server`: spadek o ok. 70 punktów procentowych
+- `robot_state_publisher`: spadek prawie o połowę
+
+Wniosek:
+
+- zmiana na `/lf/lowstate` znacząco odciążyła całą ścieżkę zależną od `LowState`
+- wcześniejsze wysokie obciążenie rzeczywiście było napędzane zbyt gęstym strumieniem `lowstate`
+
+### 16.2 Porównanie częstotliwości
+
+Przed zmianą:
+
+- `/lowstate`: ok. 770 Hz
+- `/joint_states`: ok. 160 Hz
+- `/tf`: ok. 420 Hz
+- `/dog_odom`: ok. 856 Hz
+
+Po zmianie:
+
+- `/lf/lowstate`: ok. 20.0 Hz
+- `/joint_states`: ok. 20.0 Hz
+- `/tf`: ok. 637-652 Hz
+- `/dog_odom`: ok. 955-991 Hz
+
+Interpretacja:
+
+- zmiana na `/lf/lowstate` obcięła częstotliwość wejścia `LowState` z setek Hz do ok. 20 Hz
+- `joint_states` spadł do tego samego rzędu, co tłumaczy duży spadek CPU w `lowstate_to_joint_states` i `robot_state_publisher`
+- `/tf` nie spadł, bo nadal jest silnie napędzany przez innych publisherów, szczególnie:
+  - `odom_tf_relay`
+  - `apriltag_node`
+  - `amcl`
+  - `robot_state_publisher`
+- `/dog_odom` pozostał bardzo szybki, a nawet był wyższy niż w poprzednim snapshotcie
+
+## 17. Co zmieniło się w rankingu top-consumerów
+
+Przed zmianą na `/lf/lowstate` duży udział w obciążeniu miały:
+
+- `pick_action_server`
+- `place_action_server`
+- `lowstate_to_joint_states`
+
+Po zmianie głównymi top-consumerami zostały:
+
+- `d435i_node`: ok. 101%
+- `parcel_cloud_filter`: ok. 96%
+- `odom_tf_relay`: ok. 82%
+- `nav2_container`: ok. 64%
+
+Wniosek:
+
+- zmiana nie rozwiązała całości problemu CPU
+- usunęła jednak jeden z największych i najłatwiejszych do wskazania kosztów
+- po tej zmianie głównym kandydatem do dalszej optymalizacji jest już nie `lowstate`, tylko:
+  - kamera
+  - filtr pointclouda
+  - ścieżka `dog_odom -> odom_tf_relay -> /tf`
+
+## 18. Changelog raportu
+
+### 2026-06-25, aktualizacja po zmianie na `/lf/lowstate`
+
+Dodano:
+
+- weryfikację aktualnych subskrybentów `/lf/lowstate`
+- porównanie CPU przed i po zmianie
+- porównanie częstotliwości przed i po zmianie
+- aktualizację rankingu top-consumerów
+
+Najważniejszy nowy wniosek:
+
+- przełączenie na `/lf/lowstate` znacząco poprawiło obciążenie w ścieżce `LowState`
+- aktualnym dominującym kosztem pozostały `d435i_node`, `parcel_cloud_filter`, `odom_tf_relay` i `nav2_container`
