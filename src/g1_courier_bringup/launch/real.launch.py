@@ -118,8 +118,8 @@ def generate_launch_description() -> LaunchDescription:
             description='Delay (s) before starting Nav2 so odom->base TF and first sensor data are available.',
         ),
         DeclareLaunchArgument('enable_camera', default_value='false',
-            description='Odpal d435i_node (RealSense D435i RGB+depth) plus pokaż '
-                        '/camera/image_raw w RViz Image display. Default false.'),
+            description='Odpal realsense2_camera (RealSense D435i RGB+depth). '
+                        'Default false.'),
                         
         # robot_state_publisher: TF from base_link to every URDF link.
         # Gated on enable_robot_model — set false if URDF missing.
@@ -243,11 +243,35 @@ def generate_launch_description() -> LaunchDescription:
                 ('camera_info', '/camera/color/camera_info'),
             ],
         ),
+        # RealSense D435i. The packaged rs_launch.py in Jazzy does not expose
+        # QoS launch args, so start the node directly and set stream QoS as
+        # node parameters. camera_namespace='' + camera_name='camera' gives
+        # topics under /camera/color/..., so apriltag_ros gets CameraInfo.
         Node(
-            package='g1_courier_bringup',
-            executable='d435i_node',
-            name='d435i_node',
+            package='realsense2_camera',
+            executable='realsense2_camera_node',
+            namespace='',
+            name='camera',
             output='screen',
+            parameters=[{
+                'camera_namespace': '',
+                'camera_name': 'camera',
+                'enable_depth': True,
+                'enable_color': True,
+                'enable_infra1': False,
+                'enable_infra2': False,
+                'enable_sync': True,
+                'align_depth.enable': True,
+                'rgb_camera.color_profile': '640,480,30',
+                'depth_module.depth_profile': '640,480,30',
+                'color_qos': 'SENSOR_DATA',
+                'color_info_qos': 'SENSOR_DATA',
+                'depth_qos': 'SENSOR_DATA',
+                'depth_info_qos': 'SENSOR_DATA',
+                'aligned_depth_to_color_qos': 'SENSOR_DATA',
+                'aligned_depth_to_color_info_qos': 'SENSOR_DATA',
+            }],
+            arguments=['--ros-args', '--log-level', 'info'],
             condition=IfCondition(LaunchConfiguration('enable_camera')),
         ),
 
