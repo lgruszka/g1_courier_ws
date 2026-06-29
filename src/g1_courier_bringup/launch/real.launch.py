@@ -1,6 +1,6 @@
 """Real-robot full courier stack.
 
-- pointcloud_to_laserscan (Livox Mid-360 -> /scan)
+- pointcloud_to_laserscan -> laser_filters box filter (Mid-360 -> /scan, wycina paczkę)
 - nav2 bringup with AMCL on a known map
 - apriltag_ros detector (RealSense D435i)
 - cmd_vel arbiter
@@ -109,9 +109,9 @@ def generate_launch_description() -> LaunchDescription:
             description='Start mission_node (BT). Set false for nav-only smoke '
                         'tests where you send manual goals from RViz.'),
         DeclareLaunchArgument('filter_parcel', default_value='true',
-            description='Wstaw parcel_cloud_filter (wycina bryłę niesionej paczki '
-                        'z chmury przed pointcloud_to_laserscan, by nie psuła /scan '
-                        'i AMCL). Set false by wyłączyć.'),
+            description='Wytnij bryłę niesionej paczki ze skanu 2D filtrem '
+                        'laser_filters/LaserScanBoxFilter (/scan_raw -> /scan), by nie '
+                        'psuła AMCL. false => p2l publikuje /scan wprost, bez filtra.'),
         DeclareLaunchArgument(
             'nav2_start_delay',
             default_value='1.0',
@@ -170,26 +170,17 @@ def generate_launch_description() -> LaunchDescription:
             ],
         ),
 
-        # Parcel cloud filter — wycina bryłę niesionej paczki z chmury żeby nie
-        # psuła /scan i AMCL. Gdy filter_parcel=true, pointcloud_to_laserscan
-        # czyta /livox/lidar_filtered; gdy false, czyta cloud_topic wprost.
+        # Tor skanu: chmura Mid-360 -> pointcloud_to_laserscan -> scan 2D.
+        # Gdy filter_parcel=true wycinamy bryłę niesionej paczki filtrem 2D
+        # (laser_filters/LaserScanBoxFilter) na /scan_raw -> /scan, żeby paczka
+        # nie psuła AMCL. Box wąski w Y (scan_box_filter.yaml) -> krawędź stołu
+        # przetrwa, dokowanie LIDAR_LINE działa. Filtr 2D zastąpił dawny
+        # parcel_cloud_filter 3D (osobny proces Python + hop DDS całej chmury).
         # Wszystko w TimerAction (czeka aż static TF base_link<-lidar gotowe).
         TimerAction(
             period=LaunchConfiguration('pointcloud_start_delay'),
             actions=[
-                # filtr (tylko gdy filter_parcel)
-                Node(
-                    package='g1_courier_bringup',
-                    executable='parcel_cloud_filter',
-                    name='parcel_cloud_filter',
-                    parameters=[{
-                        'cloud_in': LaunchConfiguration('cloud_topic'),
-                        'cloud_out': '/livox/lidar_filtered',
-                        'target_frame': 'base_link',
-                    }],
-                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
-                ),
-                # p2l z filtrem
+                # p2l z filtrem: chmura -> /scan_raw (box filter dokończy -> /scan)
                 Node(
                     package='pointcloud_to_laserscan',
                     executable='pointcloud_to_laserscan_node',
@@ -198,10 +189,21 @@ def generate_launch_description() -> LaunchDescription:
                         os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
                         {'queue_size': 50},
                     ],
-                    remappings=[('cloud_in', '/livox/lidar_filtered'), ('scan', '/scan')],
+                    remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
+                                ('scan', '/scan_raw')],
                     condition=IfCondition(LaunchConfiguration('filter_parcel')),
                 ),
-                # p2l bez filtra (cloud_topic wprost)
+                # Box filter 2D: /scan_raw -> /scan, wycina bryłę paczki. C++,
+                # ~722 wiązki zamiast ~20 tys. punktów chmury w Pythonie.
+                Node(
+                    package='laser_filters',
+                    executable='scan_to_scan_filter_chain',
+                    name='scan_box_filter',
+                    parameters=[os.path.join(bringup, 'config', 'scan_box_filter.yaml')],
+                    remappings=[('scan', '/scan_raw'), ('scan_filtered', '/scan')],
+                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
+                ),
+                # p2l bez filtra: chmura -> /scan wprost.
                 Node(
                     package='pointcloud_to_laserscan',
                     executable='pointcloud_to_laserscan_node',

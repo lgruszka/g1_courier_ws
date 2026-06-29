@@ -423,3 +423,36 @@ Najważniejszy nowy wniosek:
 
 - przełączenie na `/lf/lowstate` znacząco poprawiło obciążenie w ścieżce `LowState`
 - aktualnym dominującym kosztem pozostały `d435i_node`, `parcel_cloud_filter`, `odom_tf_relay` i `nav2_container`
+
+### 2026-06-29, filtr paczki 3D -> 2D (`parcel_cloud_filter` usunięty)
+
+Zdjęcie kosztu `parcel_cloud_filter` (zmierzone ~96% CPU) — filtrowanie przeniesione
+ZA konwersję na scan (§6, §7).
+
+Co zrobiono:
+
+- usunięto węzeł `parcel_cloud_filter` (proces Python: na każdą ramkę pełna kopia
+  bufora ~20 tys. punktów, promocja do float64, mnożenie macierzowe całej chmury,
+  plus dodatkowy hop DDS pełnej chmury do `pointcloud_to_laserscan`)
+- nowy tor: `chmura -> pointcloud_to_laserscan -> /scan_raw -> laser_filters/LaserScanBoxFilter -> /scan`
+- filtr 2D (C++) tnie ~722 wiązki skanu zamiast ~20 tys. punktów; znika jeden hop DDS
+- box wycinający bez zmian (base_link, te same granice co dawny cropbox 3D), teraz w `config/scan_box_filter.yaml`
+- przełącznik `filter_parcel` zachowany (`false` => `pointcloud_to_laserscan` publikuje `/scan` wprost, bez filtra)
+
+QoS (zweryfikowane lokalnie `ros2 topic info --verbose`):
+
+- `/scan_raw`: p2l publikuje BEST_EFFORT, filtr subskrybuje BEST_EFFORT — zgodne
+- `/scan`: filtr publikuje RELIABLE — kompatybilne z każdym dotychczasowym odbiorcą
+  (publisher RELIABLE obsługuje subskrybentów i best_effort, i reliable)
+
+Kompromis (świadomy):
+
+- filtr 3D usuwał punkty paczki PRZED rzutowaniem, więc scan pokazywał ścianę za paczką;
+  filtr 2D kasuje całą wiązkę z paczką, więc w wąskim stożku z przodu ściana za paczką
+  bywa tracona (wiązka = inf). Dla AMCL (pełny skan ~360°) akceptowalne. Rollback:
+  `git revert` albo `filter_parcel:=false`.
+
+Do zmierzenia na Jetsonie:
+
+- CPU `parcel_cloud_filter` (było ~96%) powinno zniknąć z rankingu
+- `pointcloud_to_laserscan` może lekko wzrosnąć (czyta teraz pełną chmurę zamiast przefiltrowanej)

@@ -32,7 +32,6 @@ setup(
             'odom_tf_relay = g1_courier_bringup.odom_tf_relay:main',
             'd435i_node = g1_courier_bringup.d435i_node:main',
             'operator_gui = g1_courier_bringup.operator_gui:main',
-            'parcel_cloud_filter = g1_courier_bringup.parcel_cloud_filter:main',
         ],
     },
 )
