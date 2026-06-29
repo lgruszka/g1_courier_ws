@@ -14,7 +14,7 @@ This launch assumes the Unitree firmware-side bridges are already running:
   - /lowstate publisher and /arm_sdk subscriber (firmware DDS bridge)
   - Livox PointCloud2 published by Unitree firmware (default
     /utlidar/cloud_livox_mid360; override via launch arg cloud_topic)
-  - RealSense D435i driver publishing /camera/color/image_raw + /camera/color/camera_info
+  - RealSense D435i driver publishing /camera/camera/color/image_raw + /camera/camera/color/camera_info
 
 This launch wires the missing TF pieces that the firmware does not
 provide:
@@ -239,22 +239,20 @@ def generate_launch_description() -> LaunchDescription:
             name='apriltag_node',
             parameters=[os.path.join(bringup, 'config', 'apriltag.yaml')],
             remappings=[
-                ('image_rect', '/camera/color/image_raw'),
-                ('camera_info', '/camera/color/camera_info'),
+                ('image_rect', '/camera/camera/color/image_raw'),
+                ('camera_info', '/camera/camera/color/camera_info'),
             ],
         ),
-        # RealSense D435i. The packaged rs_launch.py in Jazzy does not expose
-        # QoS launch args, so start the node directly and set stream QoS as
-        # node parameters. camera_namespace='' + camera_name='camera' gives
-        # topics under /camera/color/..., so apriltag_ros gets CameraInfo.
+        # RealSense D435i. Match the packaged rs_launch.py defaults:
+        # namespace=camera + name=camera -> /camera/camera/color/...
         Node(
             package='realsense2_camera',
             executable='realsense2_camera_node',
-            namespace='',
+            namespace='camera',
             name='camera',
             output='screen',
             parameters=[{
-                'camera_namespace': '',
+                'camera_namespace': 'camera',
                 'camera_name': 'camera',
                 'enable_depth': True,
                 'enable_color': True,
@@ -264,12 +262,6 @@ def generate_launch_description() -> LaunchDescription:
                 'align_depth.enable': True,
                 'rgb_camera.color_profile': '640,480,30',
                 'depth_module.depth_profile': '640,480,30',
-                'color_qos': 'SENSOR_DATA',
-                'color_info_qos': 'SENSOR_DATA',
-                'depth_qos': 'SENSOR_DATA',
-                'depth_info_qos': 'SENSOR_DATA',
-                'aligned_depth_to_color_qos': 'SENSOR_DATA',
-                'aligned_depth_to_color_info_qos': 'SENSOR_DATA',
             }],
             arguments=['--ros-args', '--log-level', 'info'],
             condition=IfCondition(LaunchConfiguration('enable_camera')),
