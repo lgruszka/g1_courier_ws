@@ -18,6 +18,13 @@ Pipeline:
 
 Wymagane (clone do src/, build osobno) — pełna instrukcja:
 docs/fast_lio_setup.md. Streszczenie:
+  git clone https://github.com/Livox-SDK/Livox-SDK2 ~/
+  cd ./Livox-SDK2/
+  mkdir build
+  cd build
+  cmake .. && make -j
+  sudo make install
+  sudo ldconfig
 
   git clone --recursive https://github.com/Ericsii/FAST_LIO_ROS2 src/FAST_LIO_ROS2
   git clone https://github.com/Livox-SDK/livox_ros_driver2 src/livox_ros_driver2
