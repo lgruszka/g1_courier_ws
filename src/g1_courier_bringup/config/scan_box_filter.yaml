@@ -10,7 +10,7 @@
 # poprzedniego cropboxa 3D (parcel_cloud_filter, commit c66e407).
 #
 # invert: false => usuwa punkty WEWNĄTRZ boxa (bryła paczki). true => odwrotnie.
-scan_to_scan_filter_chain:
+/**:
   ros__parameters:
     filter1:
       name: parcel_box

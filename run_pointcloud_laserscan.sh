@@ -1,6 +1,6 @@
 ros2 run pointcloud_to_laserscan pointcloud_to_laserscan_node --ros-args \
   -r cloud_in:=/livox/lidar \
-  -r scan:=/scan \
+  -r scan:=/scan_raw \
   -p target_frame:=livox_frame \
   -p queue_size:=40 \
   -p min_height:=-1.65 \
