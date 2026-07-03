@@ -18,7 +18,7 @@
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>slam_toolbox</exec_depend>
   <exec_depend>pointcloud_to_laserscan</exec_depend>
-  <exec_depend>laser_filters</exec_depend>
+  <exec_depend>pcl_ros</exec_depend>
   <exec_depend>apriltag_ros</exec_depend>
   <exec_depend>realsense2_camera</exec_depend>
   <exec_depend>compressed_image_transport</exec_depend>

@@ -2,7 +2,11 @@ dock_action_server:
   ros__parameters:
     cmd_vel_topic: /cmd_vel_dock
     apriltag_topic: /detections
-    camera_info_topic: /camera_info
+    # realsense2_camera (real.launch.py, namespace camera + name camera).
+    # Bylo /camera_info — po wymianie d435i_node na realsense (8c7b813) nikt
+    # tam nie publikowal i dock jechal na fallbackowych intrinsics z sima
+    # (fx=415.69 vs realne ~617 => ~33% blad skali odleglosci).
+    camera_info_topic: /camera/camera/color/camera_info
     scan_topic: /scan
     control_rate_hz: 20.0
     settle_samples: 5

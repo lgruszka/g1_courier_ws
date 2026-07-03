@@ -1,6 +1,6 @@
 """Real-robot full courier stack.
 
-- pointcloud_to_laserscan -> laser_filters box filter (Mid-360 -> /scan, wycina paczkę)
+- cropbox 3D (pcl_ros, wycina paczkę z chmury) -> pointcloud_to_laserscan (Mid-360 -> /scan)
 - nav2 bringup with AMCL on a known map
 - apriltag_ros detector (RealSense D435i)
 - cmd_vel arbiter
@@ -109,9 +109,10 @@ def generate_launch_description() -> LaunchDescription:
             description='Start mission_node (BT). Set false for nav-only smoke '
                         'tests where you send manual goals from RViz.'),
         DeclareLaunchArgument('filter_parcel', default_value='true',
-            description='Wytnij bryłę niesionej paczki ze skanu 2D filtrem '
-                        'laser_filters/LaserScanBoxFilter (/scan_raw -> /scan), by nie '
-                        'psuła AMCL. false => p2l publikuje /scan wprost, bez filtra.'),
+            description='Wytnij bryłę niesionej paczki z chmury 3D cropboxem '
+                        '(pcl_ros) PRZED pointcloud_to_laserscan, by nie psuła '
+                        'AMCL — wiązki za paczką pokazują ścianę widzianą ponad '
+                        'nią. false => p2l czyta chmurę wprost, bez filtra.'),
         DeclareLaunchArgument(
             'nav2_start_delay',
             default_value='1.0',
@@ -170,17 +171,30 @@ def generate_launch_description() -> LaunchDescription:
             ],
         ),
 
-        # Tor skanu: chmura Mid-360 -> pointcloud_to_laserscan -> scan 2D.
-        # Gdy filter_parcel=true wycinamy bryłę niesionej paczki filtrem 2D
-        # (laser_filters/LaserScanBoxFilter) na /scan_raw -> /scan, żeby paczka
-        # nie psuła AMCL. Box wąski w Y (scan_box_filter.yaml) -> krawędź stołu
-        # przetrwa, dokowanie LIDAR_LINE działa. Filtr 2D zastąpił dawny
-        # parcel_cloud_filter 3D (osobny proces Python + hop DDS całej chmury).
+        # Tor skanu: chmura Mid-360 -> cropbox 3D (wycina paczkę) -> p2l -> /scan.
+        # Cropbox usuwa bryłę niesionej paczki Z CHMURY, PRZED projekcją — dzięki
+        # temu p2l w kierunkach zasłoniętych paczką bierze ścianę widzianą PONAD
+        # nią (pełny skan, bez dziury z przodu). Filtr 2D na scanie tego nie umie:
+        # p2l bierze najbliższy punkt na kierunek, więc cięcie po projekcji
+        # zostawia dziurę ~26 st. (zmierzone na nagraniach 2026-07-03). Box wąski
+        # w Y -> krawędź stołu przetrwa po bokach, dokowanie LIDAR_LINE działa.
+        # pcl_ros filter_crop_box_node = C++, koszt znikomy (vs 96% CPU dawnego
+        # parcel_cloud_filter w Pythonie). Box w natywnej ramce chmury — bez TF.
         # Wszystko w TimerAction (czeka aż static TF base_link<-lidar gotowe).
         TimerAction(
             period=LaunchConfiguration('pointcloud_start_delay'),
             actions=[
-                # p2l z filtrem: chmura -> /scan_raw (box filter dokończy -> /scan)
+                # Cropbox 3D: chmura -> /livox/lidar_filtered (bez bryły paczki).
+                Node(
+                    package='pcl_ros',
+                    executable='filter_crop_box_node',
+                    name='parcel_cropbox',
+                    parameters=[os.path.join(bringup, 'config', 'parcel_cropbox.yaml')],
+                    remappings=[('input', LaunchConfiguration('cloud_topic')),
+                                ('output', '/livox/lidar_filtered')],
+                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
+                ),
+                # p2l z filtrem: przefiltrowana chmura -> /scan.
                 Node(
                     package='pointcloud_to_laserscan',
                     executable='pointcloud_to_laserscan_node',
@@ -189,18 +203,8 @@ def generate_launch_description() -> LaunchDescription:
                         os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
                         {'queue_size': 50},
                     ],
-                    remappings=[('cloud_in', LaunchConfiguration('cloud_topic')),
-                                ('scan', '/scan_raw')],
-                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
-                ),
-                # Box filter 2D: /scan_raw -> /scan, wycina bryłę paczki. C++,
-                # ~722 wiązki zamiast ~20 tys. punktów chmury w Pythonie.
-                Node(
-                    package='laser_filters',
-                    executable='scan_to_scan_filter_chain',
-                    name='scan_box_filter',
-                    parameters=[os.path.join(bringup, 'config', 'scan_box_filter.yaml')],
-                    remappings=[('scan', '/scan_raw'), ('scan_filtered', '/scan')],
+                    remappings=[('cloud_in', '/livox/lidar_filtered'),
+                                ('scan', '/scan')],
                     condition=IfCondition(LaunchConfiguration('filter_parcel')),
                 ),
                 # p2l bez filtra: chmura -> /scan wprost.

@@ -1,0 +1,32 @@
+# Wyciecie bryly niesionej paczki z chmury 3D PRZED pointcloud_to_laserscan
+# (pcl_ros filter_crop_box_node, C++). negative=true => usuwa punkty WEWNATRZ.
+#
+# Dlaczego 3D przed projekcja (a nie box na scanie 2D): p2l bierze NAJBLIZSZY
+# punkt pasa wysokosci w kazdym kierunku. Paczka jest najblizej, wiec filtr 2D
+# moze wiazke tylko skasowac (dziura ~26 st. z przodu, zmierzone na nagraniach
+# 2026-07-03). Po usunieciu punktow paczki z chmury p2l "przewija" wiazke do
+# sciany widzianej PONAD paczka — pelny skan bez dziury, biurka widoczne,
+# jeden /scan dla AMCL + costmap + doku.
+#
+# Box zdefiniowany w NATYWNEJ ramce chmury (livox_frame), zeby filtr nie
+# zalezal od TF. Montaz (real.launch.py static_tf_lidar): t=(0,0,0.5), roll=pi
+# => x_l = x_b;  y_l = -y_b (przedzial symetryczny, bez zmian);  z_l = 0.5 - z_b.
+# Odpowiednik w base_link: x[0.10,0.60] y[+-0.35] z[-1.0,1.0]. Historyczny box
+# (parcel_cloud_filter, c66e407) mial 0.45/+-0.25 — wymiar z nagran 2026-07-03
+# (symulacja cropbox+p2l na chmurach, przecieki = wiazki <0.6 m z przodu):
+#   bez filtra: 49-75/skan | box 0.45/25: 18-29 | 0.60/25: 1-10 | 0.60/35: 0.
+# W idle 0.45 wystarczal (98% rak), ale PODCZAS CHODU rece/lokcie (balans)
+# siegaja 0.46-0.59 m i szerzej niz +-0.25. Koszt poszerzenia znikomy: ciecie
+# w 3D odslania sciane widziana ponad paczka (dziura z przodu = baseline
+# pokoju, identyczna jak bez filtra). UWAGA: box siega blizej stolu niz
+# lidar.target_distance doku — LIDAR_LINE przy niesieniu do przetestowania.
+/**:
+  ros__parameters:
+    min_x: 0.10
+    max_x: 0.60
+    min_y: -0.35
+    max_y: 0.35
+    min_z: -0.5
+    max_z: 1.5
+    negative: true
+    keep_organized: false

@@ -24,13 +24,7 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.action.server import ServerGoalHandle
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import (
-    DurabilityPolicy,
-    HistoryPolicy,
-    QoSProfile,
-    ReliabilityPolicy,
-    qos_profile_sensor_data,
-)
+from rclpy.qos import qos_profile_sensor_data
 
 from geometry_msgs.msg import PoseStamped, Twist, Vector3Stamped
 from sensor_msgs.msg import CameraInfo, LaserScan
@@ -259,19 +253,15 @@ class DockActionServer(Node):
                 str(self.get_parameter('apriltag_topic').value),
                 self._on_tag, qos_profile_sensor_data,
             )
-            # CameraInfo is conventionally latched: the publisher publishes
-            # once with TRANSIENT_LOCAL, late subscribers still receive it.
-            # Match with reliable + transient_local on our side.
-            cam_info_qos = QoSProfile(
-                reliability=ReliabilityPolicy.RELIABLE,
-                durability=DurabilityPolicy.TRANSIENT_LOCAL,
-                history=HistoryPolicy.KEEP_LAST,
-                depth=1,
-            )
+            # realsense2_camera publikuje CameraInfo per-klatkę (reliable,
+            # VOLATILE) — subskrypcja TRANSIENT_LOCAL jest z nim NIEKOMPATYBILNA
+            # (zero wiadomości -> dock wiecznie na fallback intrinsics).
+            # best_effort+volatile przyjmuje każdego publishera: i strumień
+            # realsense, i latched TRANSIENT_LOCAL (np. dawny d435i_node).
             self._cam_info_sub = self.create_subscription(
                 CameraInfo,
                 str(self.get_parameter('camera_info_topic').value),
-                self._on_camera_info, cam_info_qos,
+                self._on_camera_info, qos_profile_sensor_data,
             )
             if not CV2_OK:
                 self.get_logger().warn(

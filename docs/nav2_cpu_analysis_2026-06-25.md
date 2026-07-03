@@ -456,3 +456,52 @@ Do zmierzenia na Jetsonie:
 
 - CPU `parcel_cloud_filter` (było ~96%) powinno zniknąć z rankingu
 - `pointcloud_to_laserscan` może lekko wzrosnąć (czyta teraz pełną chmurę zamiast przefiltrowanej)
+
+### 2026-07-03, filtr paczki 2D -> cropbox 3D (pcl_ros) + fix dubla publisherów /scan_raw
+
+Diagnoza „robot z paczką nawiguje kiepsko" na nagraniach z robota
+(idle/walking × hands_normal/hands_up, 6 bagów). Trzy znalezione przyczyny:
+
+1. **Sekcja yaml filtra 2D nie pasowała do nazwy węzła** (`scan_to_scan_filter_chain`
+   vs `scan_box_filter`) — parametry się nie ładowały, łańcuch był pusty, `/scan`
+   zawierał surowe punkty paczki. Naprawione wildcardem `/**:` (c9057a6).
+2. **Dwa publishery na `/scan_raw`** — `run_pointcloud_laserscan.sh` (stary pas
+   −1.65…0.7) obok p2l z launcha (−0.5…0.8). W bagach walking 100% stampów
+   zdublowanych: AMCL dostawał naprzemiennie dwa różne pasy wysokości, 2× rate.
+   Fix: skrypt publikuje na `/scan_raw_debug` + wyrównany pas.
+3. **Filtr 2D kasuje całe wiązki** (p2l bierze najbliższy punkt na kierunek) —
+   dziura ~26° z przodu przy niesieniu; do tego ręce PODCZAS CHODU (balans)
+   sięgają 0.46–0.59 m i szerzej niż ±0.25 => przecieki za box.
+
+Zmiana: powrót do cięcia w 3D PRZED projekcją, ale w C++ —
+`pcl_ros filter_crop_box_node` (`negative:true`, box w natywnej ramce livox,
+`config/parcel_cropbox.yaml`) -> `/livox/lidar_filtered` -> p2l -> `/scan`.
+Wiązki za paczką pokazują ścianę widzianą ponad nią (bez dziury). Usunięty
+łańcuch `laser_filters`; dep `laser_filters` -> `pcl_ros` (na Jetsonie:
+`sudo apt install ros-jazzy-pcl-ros`).
+
+Walidacja (symulacja cropbox+p2l na chmurach z bagów; przecieki = wiązki
+<0.6 m w ±60° z przodu, median/skan):
+
+| bag | bez filtra | box 0.45/±0.25 (stary) | box 0.60/±0.35 (nowy) |
+|---|---|---|---|
+| idle_hands_up | 49 | 0 | 0 |
+| walking_hands_up | 75 | 29 | 0 |
+| walking_hands_up2 | 68 | 18 | 0 |
+| walking_hands_normal | 0 (p90 47) | 0 (p90 47) | 0 (p90 0) |
+
+Dziura z przodu identyczna we wszystkich wariantach (23–30° = baseline
+pomieszczenia) — cropbox 3D nie dokłada nic, filtr 2D dokładał +26°.
+
+Przy okazji (dokowanie): po wymianie d435i_node na realsense2_camera (8c7b813)
+nikt nie publikował `/camera_info`, którego słuchał dock (do tego subskrypcja
+TRANSIENT_LOCAL niekompatybilna z volatile realsense) — dock jechał na
+fallbackowych intrinsics z sima (fx=415.69 vs realne ~617, ~33% błąd skali
+odległości). Fix: `docking.yaml` camera_info_topic ->
+`/camera/camera/color/camera_info`, subskrypcja QoS -> sensor_data.
+
+Ryzyko do przetestowania: box sięga bliżej niż `lidar.target_distance` doku
+(0.30) — dokowanie LIDAR_LINE z paczką może głodzić RANSAC na finalnym
+podejściu (uwaga: te wiązki i tak fizycznie zasłania niesiona paczka).
+W razie problemu: poszerzyć okno kątowe fitu albo `filter_parcel:=false` na
+czas testu.
