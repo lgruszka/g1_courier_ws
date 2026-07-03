@@ -181,6 +181,13 @@ def generate_launch_description() -> LaunchDescription:
         # pcl_ros filter_crop_box_node = C++, koszt znikomy (vs 96% CPU dawnego
         # parcel_cloud_filter w Pythonie). Box w natywnej ramce chmury — bez TF.
         # Wszystko w TimerAction (czeka aż static TF base_link<-lidar gotowe).
+        #
+        # respawn=True + scan_watchdog (niżej): znane zacięcie na realnym G1 —
+        # p2l odpalony z launchera potrafił przestać publikować po kilkunastu
+        # sekundach od startu stacku (źródło żyło; ręczny restart zawsze
+        # leczył, stąd historycznie drugi p2l ze skryptu = przeplot skanów).
+        # Watchdog wykrywa ciszę na /scan i ubija procesy toru; respawn
+        # wstawia je z powrotem — zautomatyzowany "ręczny restart".
         TimerAction(
             period=LaunchConfiguration('pointcloud_start_delay'),
             actions=[
@@ -192,6 +199,7 @@ def generate_launch_description() -> LaunchDescription:
                     parameters=[os.path.join(bringup, 'config', 'parcel_cropbox.yaml')],
                     remappings=[('input', LaunchConfiguration('cloud_topic')),
                                 ('output', '/livox/lidar_filtered')],
+                    respawn=True, respawn_delay=2.0,
                     condition=IfCondition(LaunchConfiguration('filter_parcel')),
                 ),
                 # p2l z filtrem: przefiltrowana chmura -> /scan.
@@ -205,6 +213,7 @@ def generate_launch_description() -> LaunchDescription:
                     ],
                     remappings=[('cloud_in', '/livox/lidar_filtered'),
                                 ('scan', '/scan')],
+                    respawn=True, respawn_delay=2.0,
                     condition=IfCondition(LaunchConfiguration('filter_parcel')),
                 ),
                 # p2l bez filtra: chmura -> /scan wprost.
@@ -217,7 +226,16 @@ def generate_launch_description() -> LaunchDescription:
                         {'queue_size': 50},
                     ],
                     remappings=[('cloud_in', LaunchConfiguration('cloud_topic')), ('scan', '/scan')],
+                    respawn=True, respawn_delay=2.0,
                     condition=UnlessCondition(LaunchConfiguration('filter_parcel')),
+                ),
+                # Watchdog toru skanu: keepalive dla leniwej subskrypcji p2l
+                # + restart toru gdy /scan zamilknie (patrz scan_watchdog.py).
+                Node(
+                    package='g1_courier_bringup',
+                    executable='scan_watchdog',
+                    name='scan_watchdog',
+                    respawn=True, respawn_delay=2.0,
                 ),
             ],
         ),
