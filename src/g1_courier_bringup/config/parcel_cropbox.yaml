@@ -1,5 +1,6 @@
 # Wyciecie bryly niesionej paczki z chmury 3D PRZED pointcloud_to_laserscan
-# (pcl_ros filter_crop_box_node, C++). negative=true => usuwa punkty WEWNATRZ.
+# (wezel parcel_cropbox z tego pakietu; nazwy parametrow zgodne z pcl_ros
+# CropBox). negative=true => usuwa punkty WEWNATRZ.
 #
 # Dlaczego 3D przed projekcja (a nie box na scanie 2D): p2l bierze NAJBLIZSZY
 # punkt pasa wysokosci w kazdym kierunku. Paczka jest najblizej, wiec filtr 2D

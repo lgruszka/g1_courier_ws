@@ -34,8 +34,11 @@ from sensor_msgs.msg import LaserScan
 # Wzorce procesów toru skanu (pkill -f). Celowo szerokie: na robocie tor
 # jest jeden; ewentualny debugowy p2l (run_pointcloud_laserscan.sh) też
 # zostanie ubity — i dobrze, nie powinien działać obok stacku.
+# filter_crop_box_node zostaje na liście, żeby wymieść ewentualne zabłąkane
+# instancje pcl_ros ze starszych checkoutów.
 _PIPELINE_PATTERNS = (
     'pointcloud_to_laserscan_node',
+    'parcel_cropbox',
     'filter_crop_box_node',
 )
 

@@ -192,9 +192,14 @@ def generate_launch_description() -> LaunchDescription:
             period=LaunchConfiguration('pointcloud_start_delay'),
             actions=[
                 # Cropbox 3D: chmura -> /livox/lidar_filtered (bez bryły paczki).
+                # Własny węzeł zamiast pcl_ros filter_crop_box_node — pcl_ros na
+                # realnym G1 przestawał publikować po kilku wiadomościach (węzeł
+                # żył, bez błędów, także standalone z configiem passthrough);
+                # nasz czyta/nadaje sensor_data QoS jak p2l i raportuje licznik
+                # chmur co 10 s, więc ewentualna cisza jest widoczna w logu.
                 Node(
-                    package='pcl_ros',
-                    executable='filter_crop_box_node',
+                    package='g1_courier_bringup',
+                    executable='parcel_cropbox',
                     name='parcel_cropbox',
                     parameters=[os.path.join(bringup, 'config', 'parcel_cropbox.yaml')],
                     remappings=[('input', LaunchConfiguration('cloud_topic')),
