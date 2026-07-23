@@ -16,13 +16,11 @@ This launch assumes the Unitree firmware-side bridges are already running:
     /utlidar/cloud_livox_mid360; override via launch arg cloud_topic)
   - RealSense D435i driver publishing /camera/camera/color/image_raw + /camera/camera/color/camera_info
 
-This launch wires the missing TF pieces that the firmware does not
-provide:
-  - robot_state_publisher loads G1 URDF -> base_link → body links TF
-  - lowstate_to_joint_states converts /lowstate -> /joint_states so RSP
-    has live angles
-  - static_transform_publisher base_link -> lidar_frame (override via
-    lidar_xyz / lidar_frame_id launch args; defaults assume Mid-360 on head)
+Sensors + TF: wspolny sensors_tf.launch.py (drzewo wg REP-120:
+odom->base_footprint [relay, flatten] -> base_link [spaw] -> lidar/URDF;
+tor skanu z cropboxem paczki, respawn i watchdogiem). Montaz lidaru
+per-robot: argi lidar_roll/lidar_pitch/lidar_z/footprint_z (pomiar RANSAC
+plaszczyzny podlogi; defaulty = montaz nominalny).
 
 Sim equivalent: `g1_courier_sim/launch/sim_bridge.launch.py` (separate branch
 `courier-sim`).
@@ -34,11 +32,10 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction, TimerAction
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, LaunchConfiguration
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetRemap
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -56,10 +53,6 @@ def generate_launch_description() -> LaunchDescription:
         'urdf', 'g1_29dof.urdf',
     )
 
-    robot_description = ParameterValue(
-        Command(['xacro ', LaunchConfiguration('urdf_path')]),
-        value_type=str,
-    )
     odom_topic = LaunchConfiguration('odom_topic')
     odom_frame = LaunchConfiguration('odom_frame')
     base_frame = LaunchConfiguration('base_frame')
@@ -82,8 +75,11 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             'base_frame',
-            default_value='base_link',
-            description='Robot base frame name used by nav and TF relay.',
+            default_value='base_footprint',
+            description='Child frame TF relaya (REP-120: base_footprint '
+                        'plasko na podlodze; spaw base_footprint->base_link '
+                        'w sensors_tf). NIE ustawiaj base_link — konflikt '
+                        'ze spawem (dwoch rodzicow w drzewie TF).',
         ),
         DeclareLaunchArgument(
             'publish_odom_tf',
@@ -122,141 +118,30 @@ def generate_launch_description() -> LaunchDescription:
             description='Odpal realsense2_camera (RealSense D435i RGB+depth). '
                         'Default false.'),
                         
-        # robot_state_publisher: TF from base_link to every URDF link.
-        # Gated on enable_robot_model — set false if URDF missing.
-        Node(
-            package='robot_state_publisher',
-            executable='robot_state_publisher',
-            name='robot_state_publisher',
-            parameters=[{'robot_description': robot_description}],
-            condition=IfCondition(LaunchConfiguration('enable_robot_model')),
-        ),
-
-        # /lowstate -> /joint_states adapter so robot_state_publisher
-        # has live joint angles to compute TF.
-        Node(
-            package='g1_courier_safety',
-            executable='lowstate_to_joint_states',
-            name='lowstate_to_joint_states',
-            condition=IfCondition(LaunchConfiguration('enable_robot_model')),
-        ),
-
-        # Static TF base_link -> pelvis (identity). URDF root is `pelvis`,
-        # but the rest of the stack (nav2, AMCL, costmaps, odom_tf_relay)
-        # uses `base_link` as the robot frame. Without this bridge, RViz
-        # RobotModel fails with "No transform from <link> to base_link" for
-        # every URDF body link. Identity on G1 — pelvis is geometrically
-        # base_link.
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_pelvis_tf',
-            arguments=['0', '0', '0', '0', '0', '0', '1',
-                       'base_link', 'pelvis'],
-            condition=IfCondition(LaunchConfiguration('enable_robot_model')),
-        ),
-
-        # Static TF base_link -> lidar frame. Unitree firmware does NOT
-        # publish this. Default assumes Mid-360 on G1 head ~1.45 m above
-        # pelvis. MEASURE PHYSICALLY and override if wrong.
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='static_tf_lidar',
-            arguments=[
-                '--x', '0.0', '--y', '0.0', '--z', '0.5',
-                '--roll', '3.14159', '--pitch', '0.0', '--yaw', '0.0',
-                '--frame-id', 'base_link',
-                '--child-frame-id', LaunchConfiguration('lidar_frame_id'),
-            ],
-        ),
-
-        # Tor skanu: chmura Mid-360 -> cropbox 3D (wycina paczkę) -> p2l -> /scan.
-        # Cropbox usuwa bryłę niesionej paczki Z CHMURY, PRZED projekcją — dzięki
-        # temu p2l w kierunkach zasłoniętych paczką bierze ścianę widzianą PONAD
-        # nią (pełny skan, bez dziury z przodu). Filtr 2D na scanie tego nie umie:
-        # p2l bierze najbliższy punkt na kierunek, więc cięcie po projekcji
-        # zostawia dziurę ~26 st. (zmierzone na nagraniach 2026-07-03). Box wąski
-        # w Y -> krawędź stołu przetrwa po bokach, dokowanie LIDAR_LINE działa.
-        # pcl_ros filter_crop_box_node = C++, koszt znikomy (vs 96% CPU dawnego
-        # parcel_cloud_filter w Pythonie). Box w natywnej ramce chmury — bez TF.
-        # Wszystko w TimerAction (czeka aż static TF base_link<-lidar gotowe).
-        #
-        # respawn=True + scan_watchdog (niżej): znane zacięcie na realnym G1 —
-        # p2l odpalony z launchera potrafił przestać publikować po kilkunastu
-        # sekundach od startu stacku (źródło żyło; ręczny restart zawsze
-        # leczył, stąd historycznie drugi p2l ze skryptu = przeplot skanów).
-        # Watchdog wykrywa ciszę na /scan i ubija procesy toru; respawn
-        # wstawia je z powrotem — zautomatyzowany "ręczny restart".
-        TimerAction(
-            period=LaunchConfiguration('pointcloud_start_delay'),
-            actions=[
-                # Cropbox 3D: chmura -> /livox/lidar_filtered (bez bryły paczki).
-                # Własny węzeł zamiast pcl_ros filter_crop_box_node — pcl_ros na
-                # realnym G1 przestawał publikować po kilku wiadomościach (węzeł
-                # żył, bez błędów, także standalone z configiem passthrough);
-                # nasz czyta/nadaje sensor_data QoS jak p2l i raportuje licznik
-                # chmur co 10 s, więc ewentualna cisza jest widoczna w logu.
-                Node(
-                    package='g1_courier_bringup',
-                    executable='parcel_cropbox',
-                    name='parcel_cropbox',
-                    parameters=[os.path.join(bringup, 'config', 'parcel_cropbox.yaml')],
-                    remappings=[('input', LaunchConfiguration('cloud_topic')),
-                                ('output', '/livox/lidar_filtered')],
-                    respawn=True, respawn_delay=2.0,
-                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
-                ),
-                # p2l z filtrem: przefiltrowana chmura -> /scan.
-                Node(
-                    package='pointcloud_to_laserscan',
-                    executable='pointcloud_to_laserscan_node',
-                    name='pointcloud_to_laserscan',
-                    parameters=[
-                        os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
-                        {'queue_size': 50},
-                    ],
-                    remappings=[('cloud_in', '/livox/lidar_filtered'),
-                                ('scan', '/scan')],
-                    respawn=True, respawn_delay=2.0,
-                    condition=IfCondition(LaunchConfiguration('filter_parcel')),
-                ),
-                # p2l bez filtra: chmura -> /scan wprost.
-                Node(
-                    package='pointcloud_to_laserscan',
-                    executable='pointcloud_to_laserscan_node',
-                    name='pointcloud_to_laserscan',
-                    parameters=[
-                        os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
-                        {'queue_size': 50},
-                    ],
-                    remappings=[('cloud_in', LaunchConfiguration('cloud_topic')), ('scan', '/scan')],
-                    respawn=True, respawn_delay=2.0,
-                    condition=UnlessCondition(LaunchConfiguration('filter_parcel')),
-                ),
-                # Watchdog toru skanu: keepalive dla leniwej subskrypcji p2l
-                # + restart toru gdy /scan zamilknie (patrz scan_watchdog.py).
-                Node(
-                    package='g1_courier_bringup',
-                    executable='scan_watchdog',
-                    name='scan_watchdog',
-                    respawn=True, respawn_delay=2.0,
-                ),
-            ],
-        ),
-
-        Node(
-            package='g1_courier_bringup',
-            executable='odom_tf_relay',
-            name='odom_tf_relay',
-            condition=IfCondition(LaunchConfiguration('publish_odom_tf')),
-            parameters=[{
+        # Wspolny tor sensoryczny + TF (sensors_tf.launch.py): model robota,
+        # spawy base_footprint/pelvis, TF lidaru (montaz per-robot argami
+        # lidar_roll/lidar_pitch/lidar_z/footprint_z), odom_tf_relay
+        # (flatten, throttle 50 Hz), tor skanu z cropboxem paczki,
+        # respawnem i scan_watchdogiem — historia i uzasadnienia w
+        # sensors_tf.launch.py (m.in. zaciecia p2l na realnym G1).
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(bringup, 'launch', 'sensors_tf.launch.py')),
+            launch_arguments={
+                'cloud_topic': LaunchConfiguration('cloud_topic'),
+                'filter_parcel': LaunchConfiguration('filter_parcel'),
+                'pointcloud_start_delay':
+                    LaunchConfiguration('pointcloud_start_delay'),
                 'odom_topic': odom_topic,
                 'odom_frame': odom_frame,
                 'base_frame': base_frame,
-                'use_msg_frame_ids': False,
-                'use_msg_stamp': False,
-            }],
+                'publish_odom_tf': LaunchConfiguration('publish_odom_tf'),
+                'odom_use_msg_stamp': 'false',
+                'enable_robot_model':
+                    LaunchConfiguration('enable_robot_model'),
+                'urdf_path': LaunchConfiguration('urdf_path'),
+                'lidar_frame_id': LaunchConfiguration('lidar_frame_id'),
+            }.items(),
         ),
 
         # AprilTag detector.
