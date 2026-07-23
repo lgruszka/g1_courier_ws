@@ -60,10 +60,16 @@ def generate_launch_description() -> LaunchDescription:
             'foxglove', default_value='false',
             description='foxglove_bridge (WebSocket :8765) + rebroadcast '
                         '/tf_static. Wymaga ros-jazzy-foxglove-bridge.'),
+        # Montaz + skala PER-ROBOT — deklarowane tu, by przeszly do include
+        # (defaulty = nominalne; realne wartosci podaje skrypt/uzytkownik).
+        DeclareLaunchArgument('footprint_z', default_value='0.75'),
+        DeclareLaunchArgument('lidar_z', default_value='0.5'),
+        DeclareLaunchArgument('lidar_roll', default_value='3.14159'),
+        DeclareLaunchArgument('lidar_pitch', default_value='0.0'),
+        DeclareLaunchArgument('lidar_frame_id', default_value='livox_frame'),
+        DeclareLaunchArgument('odom_trans_scale', default_value='1.0'),
 
-        # Wspolny tor sensoryczny + TF. Montaz per-robot przekazuj argami
-        # (footprint_z / lidar_z / lidar_roll / lidar_pitch — przechodza
-        # do include przez wspolna przestrzen argumentow launcha).
+        # Wspolny tor sensoryczny + TF.
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(bringup, 'launch', 'sensors_tf.launch.py')),
@@ -71,6 +77,12 @@ def generate_launch_description() -> LaunchDescription:
                 'cloud_topic': LaunchConfiguration('cloud_topic'),
                 'odom_topic': LaunchConfiguration('odom_topic'),
                 'enable_robot_model': LaunchConfiguration('enable_robot_model'),
+                'footprint_z': LaunchConfiguration('footprint_z'),
+                'lidar_z': LaunchConfiguration('lidar_z'),
+                'lidar_roll': LaunchConfiguration('lidar_roll'),
+                'lidar_pitch': LaunchConfiguration('lidar_pitch'),
+                'lidar_frame_id': LaunchConfiguration('lidar_frame_id'),
+                'odom_trans_scale': LaunchConfiguration('odom_trans_scale'),
             }.items(),
         ),
 

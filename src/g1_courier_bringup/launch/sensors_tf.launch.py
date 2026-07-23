@@ -67,6 +67,10 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('odom_max_rate', default_value='50.0',
             description='Throttle TF z odometrii [Hz] (0 = 1:1; /dog_odom '
                         'na G1 to ~950 Hz — patrz odom_tf_relay).'),
+        DeclareLaunchArgument('odom_trans_scale', default_value='1.0',
+            description='Korekta skali translacji odometrii PER-ROBOT '
+                        '(1.0 = bez zmian; biped G1 potrafi niedoszacowywac '
+                        'dystans — zmierz narzedziem verdict, ustaw 1/ratio).'),
 
         # --- argi: montaz PER-ROBOT (pomiar RANSAC podlogi) ---
         DeclareLaunchArgument('footprint_z', default_value='0.75',
@@ -160,6 +164,7 @@ def generate_launch_description() -> LaunchDescription:
                 # do bazy 2D rzutujemy na podloge (x/y/yaw).
                 'flatten': True,
                 'max_rate': LaunchConfiguration('odom_max_rate'),
+                'trans_scale': LaunchConfiguration('odom_trans_scale'),
             }],
         ),
 

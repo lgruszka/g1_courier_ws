@@ -31,6 +31,13 @@ class OdomTfRelay(Node):
         # z przechylami tulowia) — do nawigacji 2D ramka bazowa ma lezec
         # plasko na podlodze, inaczej AMCL klei plaszczyzne mapy do bioder.
         self.declare_parameter('flatten', False)
+        # Korekta skali translacji odometrii (PER-ROBOT). Firmware biepa G1
+        # potrafi grubo niedoszacowywac dystans do przodu (zmierzone
+        # narzedziem verdict: odom 1.14 m przy realnych 2.15 m => 0.53,
+        # trans_scale=1/0.53~1.89). AMCL bierze odometrie z tego TF, wiec
+        # skalujemy delty tu — u zrodla — zamiast maskowac szumem (alpha).
+        # Skala wzgledem pierwszej pozycji => absolutny offset bez zmian.
+        self.declare_parameter('trans_scale', 1.0)
 
         self._odom_frame = str(self.get_parameter('odom_frame').value)
         self._base_frame = str(self.get_parameter('base_frame').value)
@@ -40,6 +47,8 @@ class OdomTfRelay(Node):
         self._min_period = (1.0 / max_rate) if max_rate > 0.0 else 0.0
         self._last_pub = 0.0
         self._flatten = bool(self.get_parameter('flatten').value)
+        self._trans_scale = float(self.get_parameter('trans_scale').value)
+        self._origin = None          # pierwsza pozycja odom (x,y) — baza skali
         odom_topic = str(self.get_parameter('odom_topic').value)
 
         qos = QoSProfile(
@@ -89,8 +98,17 @@ class OdomTfRelay(Node):
         else:
             t.header.stamp = self.get_clock().now().to_msg()
 
-        t.transform.translation.x = msg.pose.pose.position.x
-        t.transform.translation.y = msg.pose.pose.position.y
+        # Skala translacji wzgledem pierwszej pozycji: delty *= trans_scale,
+        # absolutny offset zachowany (AMCL i tak wchlania stala przez map->odom).
+        px = msg.pose.pose.position.x
+        py = msg.pose.pose.position.y
+        if self._origin is None:
+            self._origin = (px, py)
+        sx = self._origin[0] + self._trans_scale * (px - self._origin[0])
+        sy = self._origin[1] + self._trans_scale * (py - self._origin[1])
+
+        t.transform.translation.x = sx
+        t.transform.translation.y = sy
         if self._flatten:
             import math
             q = msg.pose.pose.orientation
