@@ -34,6 +34,7 @@ setup(
             'operator_gui = g1_courier_bringup.operator_gui:main',
             'parcel_cropbox = g1_courier_bringup.parcel_cropbox:main',
             'scan_watchdog = g1_courier_bringup.scan_watchdog:main',
+            'tf_static_republisher = g1_courier_bringup.tf_static_republisher:main',
         ],
     },
 )
