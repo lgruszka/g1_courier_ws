@@ -1,19 +1,25 @@
 """Live tuner dla pointcloud_to_laserscan min_height / max_height.
 
-Workflow:
-  1. real.launch.py odpalone (pointcloud_to_laserscan node chodzi)
-  2. RViz otwarte z LaserScan display (`/scan`, Best Effort)
-  3. python3 tools/scan_height_tuner.py
-  4. Slider zmienia params LIVE przez `ros2 param set` — patrzysz w RViz
-  5. Gdy /scan wygląda OK (pokrywa ściany mapy) — klik **Save to yaml**
+Tnie PIONOWO w base_footprint (REP-120; target_frame w yaml) — ramka lezy
+plasko NA PODLODZE, wiec min/max_height to wprost METRY NAD PODLOGA
+(podloga=0, blat biurka ~0.75, sufit ~2.6). Tuner sam publikuje statyczny
+lancuch base_footprint->base_link->livox_frame (montaz zmierzony RANSAC,
+jak w launchach), wiec dziala standalone: wystarczy zrodlo chmury.
 
-Plus optional auto-suggest: jeśli mapa załadowana w map_server, skrypt zaproponuje
-slice wartości na podstawie overlap heuristic.
+Workflow (VM + most TCP do robota, albo maszyna widzaca chmure w DDS):
+  1. zrodlo chmury zyje: bridge_rx (-> /livox/lidar) albo natywny DDS
+  2. python3 tools/scan_height_tuner.py [--cloud /livox/lidar]
+     (tuner sam odpala pointcloud_to_laserscan i publikuje TF)
+  3. RViz: Fixed Frame base_link, LaserScan /scan (Best Effort)
+     + PointCloud2 chmury dla odniesienia — np. rviz/mapping_debug.rviz
+  4. Suwaki zmieniaja pas na zywo (restart p2l ~0.3 s) — patrzysz w RViz
+  5. Gdy /scan = czyste sciany — klik **Save to yaml**, rsync na robota
 
 Wymaga: PyQt5 (sudo apt install python3-pyqt5).
 """
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -33,11 +39,27 @@ from PyQt5.QtWidgets import (
 )
 
 
-# Defaults — kontroler na slidery. Wartości w *target_frame* z config yaml
-# (typowo livox_frame, w którym Z+ to "do góry lokalnie w lidar").
-MIN_VAL = -3.0
+# Zakres sliderow — wartosci w base_footprint (REP-120): Z+ pionowo w gore,
+# 0 = podloga, czyli wartosci to wprost METRY NAD PODLOGA.
+MIN_VAL = -0.5
 MAX_VAL = 3.0
 STEP = 0.05
+
+# Ramka ciecia lezy na podlodze => przelicznik "nad podloga" = wartosc.
+BASE_ABOVE_FLOOR = 0.0
+
+# Statyczny lancuch jak w mapping/localization launch:
+# base_footprint --(z)--> base_link --(z, roll, pitch)--> livox_frame.
+# Defaulty = montaz nominalny (lidar do gory nogami, roll=pi); wartosci
+# PER-ROBOT podawaj flagami --footprint-z/--lidar-z/--roll/--pitch
+# (pomiar: RANSAC plaszczyzny podlogi z chmury).
+DEFAULT_FOOTPRINT_Z = 0.75
+DEFAULT_LIDAR_Z = 0.5
+DEFAULT_LIDAR_ROLL = 3.14159
+DEFAULT_LIDAR_PITCH = 0.0
+LIDAR_FRAME = 'livox_frame'
+BASE_LINK_FRAME = 'base_link'
+BASE_FRAME = 'base_footprint'
 
 # Default path do config yaml (wyliczany względem repo, nie nazwy workspace).
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -92,14 +114,23 @@ class ScanWatcher(QObject):
 
 
 class TunerWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, cloud_topic: str = DEFAULT_CLOUD_TOPIC,
+                 publish_tf: bool = True,
+                 footprint_z: float = DEFAULT_FOOTPRINT_Z,
+                 lidar_z: float = DEFAULT_LIDAR_Z,
+                 lidar_roll: float = DEFAULT_LIDAR_ROLL,
+                 lidar_pitch: float = DEFAULT_LIDAR_PITCH) -> None:
         super().__init__()
-        self.setWindowTitle('pointcloud_to_laserscan — height tuner')
-        self.resize(800, 500)
+        self.setWindowTitle('pointcloud_to_laserscan — height tuner (base_footprint)')
+        self.resize(820, 560)
         self._pcl_proc: Optional[subprocess.Popen] = None
+        self.cloud_topic = cloud_topic
+        self._mount = (footprint_z, lidar_z, lidar_roll, lidar_pitch)
 
         rclpy.init()
         self.node = rclpy.create_node('scan_height_tuner')
+        if publish_tf:
+            self._publish_lidar_tf()
         self.watcher = ScanWatcher(self.node)
         self.watcher.stats_updated.connect(self._on_stats)
         # ROS w wątku.
@@ -121,9 +152,13 @@ class TunerWindow(QMainWindow):
 
         info = QLabel(
             f'<b>Node:</b> {self.node_name} &nbsp; '
+            f'<b>Chmura:</b> {self.cloud_topic} &nbsp; '
             f'<b>YAML:</b> {DEFAULT_YAML}<br>'
-            'Zmiany leca <b>live</b> przez <code>ros2 param set</code>. '
-            'Patrz w RViz LaserScan display (`/scan`, Best Effort QoS). '
+            f'Pas ciety <b>pionowo w {BASE_FRAME}</b> (lidar do gory nogami — '
+            'tuner publikuje TF montazu i p2l sam prostuje chmure). '
+            f'Odniesienie: podloga = {-BASE_ABOVE_FLOOR:.2f}, '
+            'blat biurka &asymp; 0.0, sufit &asymp; +1.9. '
+            'Patrz w RViz na `/scan` (Best Effort). '
             'Gdy OK — klik <b>Save to yaml</b>.'
         )
         info.setTextFormat(Qt.RichText)
@@ -131,31 +166,41 @@ class TunerWindow(QMainWindow):
         root.addWidget(info)
 
         # min_height slider + spinbox.
-        self.min_slider, self.min_spin = self._make_slider_pair('min_height', -1.0)
+        self.min_slider, self.min_spin, self.min_floor_lbl = \
+            self._make_slider_pair('min_height', 0.33)
         # max_height slider + spinbox.
-        self.max_slider, self.max_spin = self._make_slider_pair('max_height', 1.0)
+        self.max_slider, self.max_spin, self.max_floor_lbl = \
+            self._make_slider_pair('max_height', 2.03)
 
-        box_min = QGroupBox('min_height [m] (poniżej tego punkty wycięte)')
+        box_min = QGroupBox('min_height [m w base_link] — DOLNE ciecie: '
+                            'podnies, by wyciac podloge/meble')
         bl1 = QVBoxLayout(box_min)
         bl1.addWidget(self.min_slider)
-        bl1.addWidget(self.min_spin)
+        row_min = QHBoxLayout()
+        row_min.addWidget(self.min_spin)
+        row_min.addWidget(self.min_floor_lbl)
+        bl1.addLayout(row_min)
         root.addWidget(box_min)
 
-        box_max = QGroupBox('max_height [m] (powyżej tego punkty wycięte)')
+        box_max = QGroupBox('max_height [m w base_link] — GORNE ciecie: '
+                            'obniz, by wyciac sufit/lampy')
         bl2 = QVBoxLayout(box_max)
         bl2.addWidget(self.max_slider)
-        bl2.addWidget(self.max_spin)
+        row_max = QHBoxLayout()
+        row_max.addWidget(self.max_spin)
+        row_max.addWidget(self.max_floor_lbl)
+        bl2.addLayout(row_max)
         root.addWidget(box_max)
 
-        # Quick presets.
+        # Quick presets (wartosci w base_link; w nawiasie metry nad podloga).
         preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel('<b>Quick presets:</b>'))
+        preset_row.addWidget(QLabel('<b>Presety:</b>'))
         for name, (lo, hi) in [
-            ('podłoga -1.0..-0.5', (-1.0, -0.5)),
-            ('niskie -0.3..+0.3', (-0.3, 0.3)),
-            ('biurka 0.3..0.8', (0.3, 0.8)),
-            ('ściany 0.8..1.5', (0.8, 1.5)),
-            ('wszystko -2..+2', (-2.0, 2.0)),
+            ('ściany+przeszkody 0.33..2.03', (0.33, 2.03)),
+            ('ściany nad meblami 1.1..2.0', (1.1, 2.0)),
+            ('pas mebli 0.3..1.1', (0.3, 1.1)),
+            ('podłoga test -0.2..0.15', (-0.2, 0.15)),
+            ('wszystko -0.3..2.8', (-0.3, 2.8)),
         ]:
             btn = QPushButton(name)
             btn.clicked.connect(lambda _, l=lo, h=hi: self._apply_preset(l, h))
@@ -192,6 +237,39 @@ class TunerWindow(QMainWindow):
         self._pub_count_timer.timeout.connect(self._update_scan_publishers_count)
         self._pub_count_timer.start(1000)
 
+    def _publish_lidar_tf(self) -> None:
+        """Statyczny lancuch base_footprint->base_link->livox_frame (jak w
+        launchach) — publikowany przez wezel tunera, zeby p2l z
+        target_frame=base_footprint dzialal standalone."""
+        import math
+        from geometry_msgs.msg import TransformStamped
+        from tf2_ros import StaticTransformBroadcaster
+        self._tf_bcaster = StaticTransformBroadcaster(self.node)
+        now = self.node.get_clock().now().to_msg()
+        footprint_z, lidar_z, lidar_roll, lidar_pitch = self._mount
+
+        weld = TransformStamped()
+        weld.header.stamp = now
+        weld.header.frame_id = BASE_FRAME
+        weld.child_frame_id = BASE_LINK_FRAME
+        weld.transform.translation.z = footprint_z
+        weld.transform.rotation.w = 1.0
+
+        t = TransformStamped()
+        t.header.stamp = now
+        t.header.frame_id = BASE_LINK_FRAME
+        t.child_frame_id = LIDAR_FRAME
+        t.transform.translation.z = lidar_z
+        roll, pitch, yaw = lidar_roll, lidar_pitch, 0.0
+        cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+        cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+        cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+        t.transform.rotation.w = cr * cp * cy + sr * sp * sy
+        t.transform.rotation.x = sr * cp * cy - cr * sp * sy
+        t.transform.rotation.y = cr * sp * cy + sr * cp * sy
+        t.transform.rotation.z = cr * cp * sy - sr * sp * cy
+        self._tf_bcaster.sendTransform([weld, t])
+
     def _kill_all_converters(self) -> None:
         try:
             subprocess.run(
@@ -221,7 +299,19 @@ class TunerWindow(QMainWindow):
 
     def _ensure_single_converter_running(self) -> None:
         self._kill_all_converters()
-        self._start_converter(min_h=-1.0, max_h=1.0)
+        lo, hi = self._read_yaml_heights()
+        self._start_converter(min_h=lo, max_h=hi)
+
+    @staticmethod
+    def _read_yaml_heights() -> tuple[float, float]:
+        try:
+            import yaml as y
+            with open(DEFAULT_YAML) as f:
+                data = y.safe_load(f)
+            p = data.get('pointcloud_to_laserscan', {}).get('ros__parameters', {})
+            return float(p.get('min_height', 0.33)), float(p.get('max_height', 2.03))
+        except Exception:
+            return 0.33, 2.03
 
     def _build_converter_cmd(self, min_h: float, max_h: float) -> list[str]:
         return [
@@ -230,8 +320,10 @@ class TunerWindow(QMainWindow):
             '--params-file', DEFAULT_YAML,
             '-p', f'min_height:={min_h}',
             '-p', f'max_height:={max_h}',
+            # Pas MUSI byc pionowy — wymus base_link nawet na starym yaml.
+            '-p', f'target_frame:={BASE_FRAME}',
             '-r', '__node:=pointcloud_to_laserscan',
-            '-r', f'cloud_in:={DEFAULT_CLOUD_TOPIC}',
+            '-r', f'cloud_in:={self.cloud_topic}',
             '-r', 'scan:=/scan',
         ]
 
@@ -258,24 +350,35 @@ class TunerWindow(QMainWindow):
         spin.setDecimals(2)
         spin.setValue(default)
 
+        # Przelicznik na metry nad podloga (etykieta obok spinboxa).
+        floor_lbl = QLabel()
+        floor_lbl.setFont(QFont('Monospace'))
+
+        def update_floor(v: float) -> None:
+            floor_lbl.setText(f'= {v + BASE_ABOVE_FLOOR:+.2f} m nad podłogą')
+
+        update_floor(default)
+
         # Two-way binding.
         def on_slider(v):
             real = MIN_VAL + v * STEP
             spin.blockSignals(True)
             spin.setValue(real)
             spin.blockSignals(False)
+            update_floor(real)
             self._apply_live(name, real)
 
         def on_spin(v):
             slider.blockSignals(True)
             slider.setValue(int((v - MIN_VAL) / STEP))
             slider.blockSignals(False)
+            update_floor(v)
             self._apply_live(name, v)
 
         slider.valueChanged.connect(on_slider)
         spin.valueChanged.connect(on_spin)
 
-        return slider, spin
+        return slider, spin, floor_lbl
 
     def _apply_live(self, param: str, value: float) -> None:
         # W praktyce ten node nie aplikuje min/max dynamicznie, więc
@@ -323,8 +426,8 @@ class TunerWindow(QMainWindow):
             with open(DEFAULT_YAML) as f:
                 data = y.safe_load(f)
             params = data.get('pointcloud_to_laserscan', {}).get('ros__parameters', {})
-            self.min_spin.setValue(float(params.get('min_height', -1.0)))
-            self.max_spin.setValue(float(params.get('max_height', 1.0)))
+            self.min_spin.setValue(float(params.get('min_height', 0.33)))
+            self.max_spin.setValue(float(params.get('max_height', 2.03)))
         except Exception as exc:
             QMessageBox.warning(
                 self, 'Yaml load fail', f'Nie udało się wczytać {DEFAULT_YAML}: {exc}'
@@ -343,15 +446,20 @@ class TunerWindow(QMainWindow):
             )
             params['min_height'] = float(self.min_spin.value())
             params['max_height'] = float(self.max_spin.value())
+            # Wartosci sa strojone pionowo — pilnuj spojnej ramki w yaml.
+            params['target_frame'] = BASE_FRAME
             with open(DEFAULT_YAML, 'w') as f:
                 y.safe_dump(data, f, default_flow_style=False, sort_keys=False)
             QMessageBox.information(
                 self, 'Saved',
                 f'min_height={self.min_spin.value():.2f}, '
-                f'max_height={self.max_spin.value():.2f}\n\n'
-                f'Zapisane do: {DEFAULT_YAML}\n\n'
-                'PAMIĘTAJ: live values już chodzą (przez ros2 param set), ale yaml '
-                'jest aplikowany dopiero przy KOLEJNYM uruchomieniu launchu.'
+                f'max_height={self.max_spin.value():.2f} '
+                f'(= {self.min_spin.value() + BASE_ABOVE_FLOOR:.2f}..'
+                f'{self.max_spin.value() + BASE_ABOVE_FLOOR:.2f} m nad podłogą)\n\n'
+                f'Zapisane do: {DEFAULT_YAML}\n'
+                f'(target_frame={BASE_FRAME})\n\n'
+                'PAMIĘTAJ: yaml jest aplikowany przy KOLEJNYM uruchomieniu launchu; '
+                'na robocie dopiero po rsync + colcon build w kontenerze.'
             )
         except Exception as exc:
             QMessageBox.critical(self, 'Save fail', str(exc))
@@ -368,8 +476,27 @@ class TunerWindow(QMainWindow):
 
 
 def main():
-    app = QApplication(sys.argv)
-    win = TunerWindow()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--cloud', default=DEFAULT_CLOUD_TOPIC,
+                    help='topik PointCloud2 (VM przez most: /livox/lidar; '
+                         'natywnie na robocie: /utlidar/cloud_livox_mid360)')
+    ap.add_argument('--no-tf', action='store_true',
+                    help='nie publikuj statycznego lancucha TF '
+                         '(gdy launch juz go publikuje)')
+    ap.add_argument('--footprint-z', type=float, default=DEFAULT_FOOTPRINT_Z,
+                    help='wysokosc base_link nad podloga [m]')
+    ap.add_argument('--lidar-z', type=float, default=DEFAULT_LIDAR_Z,
+                    help='wysokosc lidaru nad base_link [m]')
+    ap.add_argument('--roll', type=float, default=DEFAULT_LIDAR_ROLL,
+                    help='roll montazu lidaru [rad] (do gory nogami = pi)')
+    ap.add_argument('--pitch', type=float, default=DEFAULT_LIDAR_PITCH,
+                    help='pitch montazu lidaru [rad] (pomiar RANSAC)')
+    args, qt_args = ap.parse_known_args()
+
+    app = QApplication(sys.argv[:1] + qt_args)
+    win = TunerWindow(cloud_topic=args.cloud, publish_tf=not args.no_tf,
+                      footprint_z=args.footprint_z, lidar_z=args.lidar_z,
+                      lidar_roll=args.roll, lidar_pitch=args.pitch)
     win.show()
     sys.exit(app.exec_())
 
