@@ -71,6 +71,18 @@ def generate_launch_description() -> LaunchDescription:
             description='Korekta skali translacji odometrii PER-ROBOT '
                         '(1.0 = bez zmian; biped G1 potrafi niedoszacowywac '
                         'dystans — zmierz narzedziem verdict, ustaw 1/ratio).'),
+        DeclareLaunchArgument('odom_still_dist', default_value='0.0',
+            description='ZUPT: prog rozpietosci xy [m] w oknie, ponizej ktorego '
+                        'robot uznajemy za stojacego i MROZIMY translacje TF '
+                        '(0 = wylaczone). Firmware bipeda pelza na postoju '
+                        '(InsideBot: ~2.6 mm/s) i wlecze za soba AMCL. '
+                        'Ustaw ~3x szum stania i ~4x mniej niz dystans '
+                        'najwolniejszego chodu w oknie (InsideBot: 0.03).'),
+        DeclareLaunchArgument('odom_still_angle', default_value='0.09',
+            description='ZUPT: prog rozpietosci yaw [rad] w oknie. Chroni '
+                        'obrot w miejscu (RotationShim) od uznania za postoj.'),
+        DeclareLaunchArgument('odom_still_window', default_value='1.0',
+            description='ZUPT: dlugosc okna detektora bezruchu [s].'),
 
         # --- argi: montaz PER-ROBOT (pomiar RANSAC podlogi) ---
         DeclareLaunchArgument('footprint_z', default_value='0.75',
@@ -165,6 +177,9 @@ def generate_launch_description() -> LaunchDescription:
                 'flatten': True,
                 'max_rate': LaunchConfiguration('odom_max_rate'),
                 'trans_scale': LaunchConfiguration('odom_trans_scale'),
+                'still_dist': LaunchConfiguration('odom_still_dist'),
+                'still_angle': LaunchConfiguration('odom_still_angle'),
+                'still_window': LaunchConfiguration('odom_still_window'),
             }],
         ),
 
