@@ -1,0 +1,61 @@
+<!--
+  Drzewo nawigacji dla robota KURIERSKIEGO: cierpliwosc zamiast manewrow.
+
+  Rozni sie od stockowego navigate_to_pose_w_replanning_and_recovery.xml
+  dwiema rzeczami, obie wynikaja z pomiaru na realnym G1 (test A3b:
+  zablokowanie drogi na ~10 s):
+
+  1) RECOVERY = "czysc costmape -> CZEKAJ 5 s -> ponow", bez Spin i bez BackUp.
+     BackUp 0.30 m cofa bipeda NA OSLEP — Mid-360 ma martwa strefe z tylu i pod
+     soba, wiec cofanie przy przeszkodzie jest grozniejsze niz samo utkniecie.
+     Dla kuriera, ktoremu w drzwiach stanal czlowiek, wlasciwa reakcja to
+     poczekac, az przejdzie. 6 ponowien x 5 s = ~30 s cierpliwosci.
+
+  2) BRAK bramki WouldA*RecoveryHelp na GORNYM recovery. W stocku porazka tej
+     bramki wywraca cala galaz Sequence i drzewo poddaje sie BEZ recovery
+     (zmierzone: cel poza mapa = Goal failed w 31 ms, zero Spin/Wait/BackUp;
+     blokada drogi = kapitulacja po 1.4 s). Bramka zostaje tylko w wewnetrznym
+     ComputePathToPose, bo TAM demonstracyjnie dziala (dala szybki przeplan
+     w A3b, 0.4 s po pierwszej porazce).
+
+  KOSZT tej decyzji, swiadomy: cel trwale niemozliwy (poza mapa, w scianie)
+  nie padnie juz natychmiast, tylko po ~30 s petli "czysc -> czekaj". Robot
+  przez ten czas STOI, wiec jest to bezpieczne — placimy czasem za cierpliwosc
+  tam, gdzie jest potrzebna.
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
+        <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+            <Sequence>
+              <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+            </Sequence>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
+          <Sequence>
+            <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </Sequence>
+        </RecoveryNode>
+      </PipelineSequence>
+
+      <!-- Recovery kurierskie: bez bramki, bez Spin, bez BackUp. -->
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <Sequence name="ClearAndWait">
+          <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          <Wait wait_duration="5.0"/>
+        </Sequence>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

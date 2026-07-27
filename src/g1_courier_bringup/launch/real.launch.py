@@ -34,8 +34,9 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node, SetRemap
+from nav2_common.launch import RewrittenYaml
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -47,6 +48,24 @@ def generate_launch_description() -> LaunchDescription:
 
     nav2_params = LaunchConfiguration('nav2_params')
     map_yaml = LaunchConfiguration('map')
+
+    # Podmiana drzewa zachowan bez edycji yamla: arg 'nav_bt_xml' przyjmuje
+    # skrot 'courier' albo pelna sciezke. Default = stockowe nav2, wiec
+    # domyslne zachowanie stacku sie NIE zmienia.
+    courier_bt = os.path.join(bringup, 'behavior_trees',
+                              'courier_navigate_to_pose.xml')
+    stock_bt = os.path.join(
+        get_package_share_directory('nav2_bt_navigator'), 'behavior_trees',
+        'navigate_to_pose_w_replanning_and_recovery.xml')
+    bt_xml = PythonExpression([
+        "'", courier_bt, "' if '", LaunchConfiguration('nav_bt_xml'),
+        "' == 'courier' else '", LaunchConfiguration('nav_bt_xml'), "'",
+    ])
+    nav2_params_bt = RewrittenYaml(
+        source_file=nav2_params,
+        param_rewrites={'default_nav_to_pose_bt_xml': bt_xml},
+        convert_types=True,
+    )
 
     default_urdf = os.path.join(
         get_package_share_directory('g1_description'),
@@ -60,6 +79,13 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument('nav2_params',
             default_value=os.path.join(bringup, 'config', 'nav2_params.yaml')),
+        DeclareLaunchArgument('nav_bt_xml', default_value=stock_bt,
+            description='Drzewo zachowan nav2. Default = STOCKOWE nav2 '
+                        '(zachowanie bez zmian). Skrot "courier" wybiera '
+                        'behavior_trees/courier_navigate_to_pose.xml: '
+                        'cierpliwe recovery (czysc costmape + Wait 5 s, do 6 '
+                        'rund), BEZ BackUp — biped nie cofa sie na oslep. '
+                        'Mozna tez podac pelna sciezke do wlasnego XML.'),
         DeclareLaunchArgument('map',
             default_value=os.path.join(bringup, 'maps', 'lab.yaml'),
             description='Saved 2D map for AMCL.'),
@@ -195,7 +221,7 @@ def generate_launch_description() -> LaunchDescription:
                         launch_arguments={
                             'map': map_yaml,
                             'use_sim_time': 'false',
-                            'params_file': nav2_params,
+                            'params_file': nav2_params_bt,
                         }.items(),
                     ),
                 ]),
