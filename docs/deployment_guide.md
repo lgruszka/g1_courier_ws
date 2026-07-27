@@ -22,6 +22,28 @@ sekcjami w tej kolejności — każda buduje na poprzedniej:
 Jeśli robiłeś już install + map + kalibrację na poprzedniej wizycie,
 przejdź od razu do [Pierwsze uruchomienie misji](#pierwsze-uruchomienie-misji).
 
+### Trzy poprawki nawigacji domyślnie WYŁĄCZONE — decyzja świadoma
+
+Etap A (2026-07-27) dorzucił trzy mechanizmy, każdy zweryfikowany pomiarem na
+realnym G1, ale **żaden nie jest domyślnie aktywny** — repo zachowuje się jak
+przedtem, dopóki launch nie dostanie argów. Zrobione tak celowo, bo weryfikacja
+odbyła się na **jednym** robocie. Przed deploymentem zdecyduj, czy je włączasz:
+
+| arg | co naprawia | bez tego |
+|---|---|---|
+| `odom_still_dist:=0.03` | pełzanie odometrii na postoju (~2.6 mm/s) | pozycja na mapie **ucieka ~29 cm/min gdy robot stoi** |
+| `nav_bt_xml:=courier` | nav2 pomija recovery przy blokadzie przejściowej | cel **przerwany po 1.4 s**, robot stoi choć droga się zwolniła |
+| `arbiter_nav_topic:=/cmd_vel_smoothed` | `velocity_smoother` publikuje w próżnię | komendy **schodkowe** (5.88 → 2.57 m/s² po naprawie) **oraz robot 2.8× wolniejszy** przy tym samym capie — firmware trawi rampę lepiej niż schodek |
+
+`odom_still_dist` jest **per-robot** — zmierz `tools/standstill_diag.py`, nie kopiuj
+wartości. Pomiary, uzasadnienia i ryzyka: **[`etap_a_utwardzenie_nav.md`](etap_a_utwardzenie_nav.md)**.
+
+> ⛔ **Włączasz smoother? Przemierz `odom_trans_scale` PO tym, nie przed.**
+> Korekta skali odometrii jest **stałą chodu, nie robota**: wygładzenie komend zmienia
+> sposób chodzenia, więc stara kalibracja przestaje pasować. Na InsideBocie skala spadła
+> **1.89 → 1.10**; pozostawienie 1.89 dawało **+72% nadmiaru drogi w TF** i widocznie
+> uciekający skan. Pomiar: `tools/scale_verdict.py` (pod ruchem, bez ściany).
+
 ## Hardware checklist
 
 - [ ] Unitree G1 (29-DoF) z włączonym `arm_sdk` i gotowym sport API

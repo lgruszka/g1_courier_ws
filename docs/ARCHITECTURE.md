@@ -88,6 +88,34 @@ Spis treści:
 - Mission nie publikuje na low-level topiki (`/arm_sdk`, `/cmd_vel_dock`). Tylko `actions/services` paczki `g1_courier_msgs`.
 - Driver layer nie zna ROS-a poza minimalnym subskrypcją/publishingiem. Logika w skillach.
 
+### Łańcuch `cmd_vel` — kto publikuje, kto czyta
+
+Jedyna droga komend prędkości do robota. **Każdy nowy producent ruchu wchodzi przez
+arbitra, nigdy wprost na `/cmd_vel`.**
+
+```mermaid
+flowchart LR
+  CS["controller_server<br/>(nav2)"] -->|/cmd_vel_nav| VS["velocity_smoother<br/>(nav2, limity accel)"]
+  VS -->|/cmd_vel_smoothed| AR["cmd_vel_arbiter"]
+  DK["dock_action_server"] -->|/cmd_vel_dock| AR
+  RT["retreat_action_server"] -->|/cmd_vel_retreat| AR
+  ES["e-stop"] -->|"/cmd_vel_estop (latched)"| AR
+  AR -->|/cmd_vel| BR["unitree_cmd_vel_bridge<br/>-> sport API"]
+  AR -.->|obserwuje| GM["gait_manager<br/>(balance 1/0)"]
+```
+
+Arbiter: priorytet **dock > retreat > nav**, e-stop nadrzędny nad wszystkim, capy
+per-tryb (`normal` / `carry`) i podłoga prędkości (firmware odmawia kroku poniżej
+progu). **Kolejność jest istotna:** wygładzanie musi być *przed* capami — odwrotna
+dawałaby gładki sygnał, a potem schodek od capa.
+
+⚠️ **Pułapka, która nas kosztowała czas:** nav2 remapuje `/cmd_vel → /cmd_vel_nav` dla
+**całej** grupy, więc `velocity_smoother` też *czyta* `/cmd_vel_nav`. Jeśli arbiter
+czyta to samo, smoother publikuje **w próżnię** i skonfigurowane limity przyspieszenia
+nie działają — bez żadnego błędu w logach. Sprawdzenie:
+`ros2 topic info /cmd_vel_smoothed` musi pokazać `Subscription count >= 1`.
+Wybór źródła: param `nav_topic` arbitra (arg `arbiter_nav_topic`).
+
 ---
 
 ## 3. Mechanizmy komunikacji ROS2 — kiedy czego używać
@@ -260,11 +288,14 @@ self.create_subscription(LaserScan, '/scan', cb, qos_profile_sensor_data)
 
 ### Układy współrzędnych TF (kanoniczne)
 ```
-map → odom → base_link → camera_link  (RealSense)
-                       → imu_link
-                       → laser_link    (rzutowany 2D scan)
-            tag_a, tag_b               (AprilTagi, frame per tag)
+map → odom → base_footprint → base_link → camera_link  (RealSense)
+              (REP-120,        (= pelvis)  → livox_frame (montaz per-robot)
+               plasko na                   → imu_link
+               podlodze)                   → laser_link  (rzutowany 2D scan)
+            tag_a, tag_b                   (AprilTagi, frame per tag)
 ```
+`base_footprint` jest **bazą 2D dla nav2** (AMCL, costmapy, bt_navigator,
+behavior_server, collision_monitor) — patrz §8.
 
 ### Parametry
 - snake_case, hierarchia kropką: `apriltag.kp_xy`, `lidar.target_distance_m`.
@@ -295,8 +326,34 @@ map → odom → base_link → camera_link  (RealSense)
 ## 8. Konwencje TF
 
 - `map` jest globalna, statyczna w czasie misji. Producent: AMCL.
-- `odom` jest "pamięcią mięśniową" — driftuje, ale spójna w krótkim czasie. Producent: unitree odometry.
+- `odom` jest "pamięcią mięśniową" — driftuje, ale spójna w krótkim czasie. Producent: unitree odometry przez `odom_tf_relay`.
+- **`base_footprint` jest bazą 2D dla nav2** (REP-120): leży **płasko na podłodze**,
+  ma tylko `x, y, yaw`. Wszystkie ramki bazowe nav2 wskazują na nią —
+  `amcl.base_frame_id`, `bt_navigator.robot_base_frame`, oba costmapy,
+  `behavior_server`, `collision_monitor`, `target_frame` w `pointcloud_to_laserscan`.
 - `base_link` jest punktem referencyjnym robota. Pozycja: środek między biodrami, na poziomie talii.
+  Producent: **statyczny** spaw `base_footprint → base_link` o wysokość miednicy.
+
+**Dlaczego dwie ramki, a nie jedna:** firmware G1 podaje w odometrii pozę **miednicy**
+(z ≈ 0.75 m, wraz z przechyłami tułowia). Gdyby baza 2D nav2 leżała na miednicy, AMCL
+kleiłby płaszczyznę mapy do bioder, a przechył tułowia przesuwałby skan względem mapy.
+`odom_tf_relay` z `flatten:=true` rzutuje pozę na podłogę (zeruje `z`, `roll`, `pitch`).
+Efekt uboczny, bardzo pożądany: `min_height`/`max_height` w `pointcloud_to_laserscan`
+stają się **metrami nad podłogą**, a nie wysokością w ramce lidaru zamontowanego do góry
+nogami — czyli wartościami przenośnymi między robotami.
+
+**Odometria nie jest przezroczystym przekaźnikiem.** `odom_tf_relay` robi trzy rzeczy,
+z których każda jest per-platforma i domyślnie wyłączona: dławik częstotliwości
+(`max_rate`), korekta skali translacji (`trans_scale` — firmware potrafi grubo
+niedoszacowywać dystans) i ZUPT (`still_dist` — firmware **całkuje kinematykę nóg
+także na postoju**). Szczegóły i pomiary: `docs/etap_a_utwardzenie_nav.md`.
+
+⚠️ **`trans_scale` jest stałą CHODU, nie robota.** Zmiana czegokolwiek w torze `cmd_vel`
+(wygładzanie, capy, progi prędkości) zmienia sposób chodzenia, a przez to skalę błędu
+odometrii — i unieważnia kalibrację. Zmierzone: 1.89 przy komendach schodkowych → 1.10
+po wpięciu `velocity_smoothera`; pozostawienie starej wartości dawało +72% nadmiaru
+drogi w TF i widocznie uciekający skan. **Odometria jest sprzężona z torem sterowania**
+— traktuj te dwie rzeczy jako jedną jednostkę kalibracyjną, nie dwie niezależne.
 - **Każdy sensor ma własny frame** zdefiniowany w URDF.
 - **Nigdy nie hardkoduj transformacji** między frame'ami w kodzie. Zawsze przez `tf2_ros.Buffer.lookup_transform`.
 - AprilTag detector publikuje tag frame'y dynamicznie. Skill, który czyta pose tagu, **lookupuje tag frame**, nie czyta z topika detekcji bezpośrednio (chyba że potrzebuje meta-danych jak ID, hamming).

@@ -2,6 +2,15 @@
 
 Data pomiaru: 2026-06-25
 
+> **⚠️ AKTUALIZACJA 2026-07-27 — przeczytaj przed wdrażaniem wniosków z tego
+> dokumentu.** Nowy pomiar na Jetsonie (8 rdzeni, sonda `tools/cpu_probe.py`) pokazał
+> **40% wysycenia na postoju i 44% podczas jazdy** — nawigacja kosztuje tylko
+> **+25 pp**. Jetson **nie jest wysycony**, więc optymalizacje kosztem funkcjonalności
+> (wyłączanie kamery, upraszczanie filtra chmury, obniżanie częstotliwości nav2)
+> **nie mają dziś uzasadnienia**. Rzeczywistym pułapem jest jeden proces Pythona:
+> `odom_tf_relay` na ~62% **jednego** rdzenia (`/dog_odom` @ 1015 Hz).
+> Pełne liczby, rozbicie per proces i wnioski: `docs/etap_a_utwardzenie_nav.md` §4.4.
+
 Zakres:
 - analiza live stosu uruchomionego z `./run_nav2.sh`
 - bez modyfikacji kodu i konfiguracji
