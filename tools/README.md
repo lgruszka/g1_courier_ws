@@ -156,6 +156,27 @@ próbkami przy ~1 kHz = reset odometrii firmware).
 Kluczowy kontekst: **`trans_scale` to stała chodu, nie robota** — po zmianie toru
 `cmd_vel` trzeba ją przemierzyć (`docs/etap_a_utwardzenie_nav.md` §4.6).
 
+## `goal_spread.py` — rozrzut dojazdu (dokładność vs powtarzalność)
+
+```bash
+python3 tools/goal_spread.py 5 540     # 5 prob, limit 540 s
+```
+
+Protokół: wyślij **ten sam** cel N razy, każdorazowo podjeżdżając **z innej strony**.
+Sonda rozpoznaje kolejne próby sama (`/goal_pose` → ruch → postój 3 s) i dopisuje
+raport po każdej, więc przerwany przebieg nie traci danych.
+
+Rozdziela dwie rzeczy, które łatwo zlepić w jedną:
+- **dokładność** — odległość końca od *zadanego* punktu (limit: `xy_goal_tolerance`),
+- **powtarzalność** — rozrzut końców względem ich własnego środka.
+
+Dla dokowania liczy się głównie **powtarzalność**, bo dok podjeżdża relatywnie do
+wykrytej krawędzi, nie do współrzędnych mapy. Sonda podaje też najdalszą parę końców
+— to jest minimalna sensowna tolerancja doku. Cele oddalone o > 0.5 m traktuje jako
+osobne punkty i grupuje niezależnie.
+
+Zmierzone na InsideBocie: `docs/etap_a_utwardzenie_nav.md` §4.7.
+
 ## `bt_trace.py` — dlaczego nav2 przerwał cel
 
 Subskrybuje `/behavior_tree_log` (nav2 publikuje tam **każde** przejście statusu

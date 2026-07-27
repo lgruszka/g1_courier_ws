@@ -16,7 +16,7 @@ zmierzono. Liczby pochodzą z realnego robota, nie z symulacji.
 
 | # | Test | Status | Dowód |
 |---|------|--------|-------|
-| A1 | Dokładność dojazdu (5× ten sam cel, rozrzut < 15 cm) | ❌ **NIE WYKONANY** | — |
+| A1 | Dokładność dojazdu (5× ten sam cel, rozrzut < 15 cm) | ✅ zdany | powtarzalność 6.6 cm, najdalsza para 12.3 cm |
 | A2 | Przeszkoda dynamiczna | ✅ zdany | replan ~1 Hz, objazd, brak kontaktu |
 | A3 | Cel nieosiągalny | ✅ zdany | `Goal failed` w 8.9 s, bez błądzenia |
 | A3b | Blokada **przejściowa** (dodany po odkryciu w A3) | ✅ zdany **po naprawie** | `Goal succeeded` po 3 rundach recovery |
@@ -25,8 +25,7 @@ zmierzono. Liczby pochodzą z realnego robota, nie z symulacji.
 | A5 | Pomiar CPU podczas jazdy | ✅ wykonany | 40% / 44% wysycenia |
 | A6 | Test prędkości carry-mode | ✅ zdany mechanicznie | cap wymuszony, cel osiągnięty |
 
-**A1 pozostaje otwarty i jest najważniejszą luką** — nie mamy liczby na powtarzalność
-dojazdu, a od niej zależą tolerancje dokowania w Etapie B. Patrz §7.
+Wynik A1 wyznacza tolerancje dla Etapu B — patrz §4.7.
 
 ---
 
@@ -406,6 +405,32 @@ zgłosiła 1.6 cm netto w oknie zawierającym 2.5 m jazdy, choć w pomiarze wyż
 akumulowała poprawnie. Sonda dostała detekcję nieciągłości `/dog_odom` (skok > 5 cm
 między próbkami przy ~1 kHz = reset odometrii firmware), żeby to złapać przy powtórce.
 
+### 4.7 Rozrzut dojazdu (A1) — liczba wejściowa dla dokowania
+
+5 podejść na **ten sam** cel, z pięciu różnych kierunków (+120°, −68°, −17°, −172°,
++90°), `tools/goal_spread.py`:
+
+| miara | wynik |
+|---|---|
+| dokładność wzgl. zadanego punktu | śr. **5.9 cm**, max **9.4 cm** (limit `xy_goal_tolerance` 10 cm) |
+| **powtarzalność** — max odchylka od środka chmury końców | **6.6 cm** (RMS 5.7 cm) |
+| najdalsza para końców | **12.3 cm** |
+| błąd yaw | ≤ 2.3° w czterech próbach, **11.5° w jednej** |
+
+Powtarzalność (6.6 cm) jest **lepsza niż najgorsza dokładność** (9.4 cm) — robot
+systematycznie ląduje nieco obok zadanego punktu, ale robi to konsekwentnie. Dla doku
+to dobra wiadomość, bo dok podjeżdża **relatywnie** do wykrytej krawędzi, nie do
+współrzędnych mapy.
+
+> **Wejście do Etapu B:** dok musi tolerować **~12 cm rozrzutu pozycji** w pozie
+> przeddokowej. Projektować z zapasem na **~20 cm**.
+
+⚠️ **Yaw bywa na styku tolerancji przy podejściu wymagającym dużej rotacji finalnej.**
+Jedyna próba z błędem 11.5° (przy `yaw_goal_tolerance` = 0.20 rad = 11.46°) to
+podejście z +120°, czyli z dużym obrotem na końcu. Pozostałe cztery: ≤ 2.3°.
+Jeśli dokowanie okaże się wrażliwe na kąt startowy, zacieśnić `yaw_goal_tolerance`
+albo wymuszać podejście z korytarza zbliżonego do docelowego kursu.
+
 ---
 
 ## 5. Jak to uruchomić
@@ -447,7 +472,7 @@ ros2 node info /odom_tf_relay | grep still                  # albo szukaj "ZUPT"
 | R3 | `allow_unknown: true` w plannerze | cel klikniętny w **nieznane pole** wysyła robota poza zmapowany obszar, żeby to sprawdzić | zamierzone (dziury po cieniach sensora); chronić przez cele z misji, nie z ręki |
 | R4 | `movement_time_allowance: 30.0` w `progress_checker` | utknięcie wykrywane dopiero po 30 s; wartość z ery symulacji | do przestrojenia |
 | R5 | `transform_tolerance: 2.0` w `pointcloud_to_laserscan` | maskuje problemy z TF/zegarem | obniżyć do 0.2 |
-| R6 | **A1 niezmierzony** | brak liczby na powtarzalność dojazdu; tolerancje dokowania w Etapie B byłyby zgadywane | **blokuje Etap B** |
+| R6 | Yaw na styku tolerancji przy podejściu z dużą rotacją finalną (11.5° przy limicie 11.46°) | dok wrażliwy na kąt startowy mógłby chybić | zmierzone (§4.7); obserwować w Etapie B |
 | R7 | Logi ROS w kontenerze przepadają przy odcięciu zasilania | diagnostyka po incydencie niemożliwa (raz już nas to kosztowało dane z testu) | rozwiązane: `ROS_LOG_DIR` na zamontowany wolumen |
 | R8 | Zegar Jetsona po reboocie może wyprzedzać synchronizację chrony | stack startuje „w połowie zepsuty" (martwy bridge, dziwne TF) | sprawdzać `timedatectl` **przed** diagnozowaniem stacku |
 
@@ -455,10 +480,12 @@ ros2 node info /odom_tf_relay | grep still                  # albo szukaj "ZUPT"
 
 ## 7. Otwarte zadania
 
-Kolejność ma znaczenie — drugie zależy od pierwszego:
+**Etap A zamknięty — wszystkie testy A1–A6 wykonane.** Zostaje strojenie i porządki:
 
-1. **A1: rozrzut dojazdu** (5× ten sam cel z różnych stron, kryterium < 15 cm).
-   Blokuje Etap B, bo tolerancje dokowania muszą być pochodną tej liczby, nie założeniem.
+1. **Domknąć liczbą korektę `trans_scale=1.10`** (§4.6). Operator potwierdził wzrokowo,
+   że skan trzyma się mapy, ale pomiar unieważniły `Pose estimate` w oknie. Sonda
+   `tools/scale_verdict.py` wykrywa to teraz sama; powtórzyć jeden prosty przejazd.
+   Przy okazji sprawdzić nierozwiązaną anomalię odometrii z §4.6.
 2. **Kontrolowany pomiar normal vs carry** na *tym samym* celu, oba **ze** smootherem.
    Dziś normal jest zmierzony tylko w starym torze, więc różnica trybów jest nieznana.
    Dopiero to daje podstawę do strojenia `max_vx_carry` (w `safety.yaml` stoi przy nim
@@ -479,6 +506,8 @@ a nie tylko przeczytać**:
 | `tools/standstill_diag.py [s]` | dryf `/dog_odom` vs TF vs `/amcl_pose` na postoju | nie |
 | `tools/bt_trace.py [s] [x] [y]` | przejścia statusów w drzewie BT (`/behavior_tree_log`) + cel poza mapą | nie |
 | `tools/cpu_probe.py [s]` | CPU per proces z `/proc` + rozbicie na wątki najcięższego | nie |
+| `tools/scale_verdict.py [s]` | skala odometrii pod ruchem (`amcl/raw`) + dryf `map→odom` na metr | tak (cel) |
+| `tools/goal_spread.py [n] [s]` | rozrzut dojazdu: dokładność i powtarzalność osobno | tak (n celów) |
 
 Wszystkie trzy są read-only i **nie ruszają robota** (`bt_trace` wysyła cel, którego
 planner nie umie zrealizować, więc nie powstaje żadna ścieżka).
