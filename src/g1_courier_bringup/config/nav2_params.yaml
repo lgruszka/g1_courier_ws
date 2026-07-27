@@ -4,7 +4,7 @@
 amcl:
   ros__parameters:
     use_sim_time: false
-    base_frame_id: base_link
+    base_frame_id: base_footprint  # REP-120: baza 2D na podlodze (spaw w sensors_tf)
     odom_frame_id: odom
     global_frame_id: map
     scan_topic: /scan
@@ -17,8 +17,18 @@ amcl:
     # nieholonomicznego. OmniMotionModel matche'uje to lepiej niż
     # DifferentialMotionModel.
     robot_model_type: nav2_amcl::OmniMotionModel
-    update_min_a: 0.1                # rejestruj filter co 5.7° rotacji
-    update_min_d: 0.10               # i 10 cm translacji (mała mapa, chcemy precyzji)
+    update_min_a: 0.05               # rejestruj filter co ~3° rotacji
+    update_min_d: 0.05               # i 5 cm translacji — czestsze aktualizacje
+                                     # = mniejszy "zamrozony" blad na postoju
+                                     # (AMCL nie aktualizuje sie bez ruchu)
+    # Ostrzejsze pole prawdopodobienstwa trafienia (default 0.2 m): przy
+    # dobrej mapie scan dociaga sie cianiej do scian. Jesli mapa slaba,
+    # zbyt male sigma destabilizuje — wtedy wroc na 0.2.
+    # (nav2: param nazywa sie sigma_hit, NIE laser_sigma_hit jak w ROS1)
+    sigma_hit: 0.1
+    # Gwarancja subsamplingu wiazek (scan ma ~722): 60 wystarcza likelihood
+    # field, reszta to koszt CPU bez zysku dokladnosci.
+    max_beams: 60
     alpha1: 0.2
     alpha2: 0.2
     alpha3: 0.2
@@ -37,7 +47,7 @@ bt_navigator:
   ros__parameters:
     use_sim_time: false
     global_frame: map
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     odom_topic: /dog_odom
     bt_loop_duration: 10
     default_server_timeout: 20
@@ -119,7 +129,7 @@ local_costmap:
       update_frequency: 5.0
       publish_frequency: 2.0
       global_frame: odom
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: false
       rolling_window: true
       width: 4
@@ -154,7 +164,7 @@ global_costmap:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: false
       footprint: '[[0.18, 0.20], [0.18, -0.20], [-0.18, -0.20], [-0.18, 0.20]]'
       resolution: 0.05
@@ -198,7 +208,7 @@ behavior_server:
     wait:
       plugin: 'nav2_behaviors::Wait'
     global_frame: odom
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     transform_tolerance: 0.2
     use_sim_time: false
 
@@ -208,7 +218,7 @@ behavior_server:
 # of the right type instead — node configures cleanly but does nothing.
 collision_monitor:
   ros__parameters:
-    base_frame_id: base_link
+    base_frame_id: base_footprint  # REP-120: baza 2D na podlodze (spaw w sensors_tf)
     odom_frame_id: odom
     # cmd_vel routed through unused topics so collision_monitor doesn't
     # fight our /cmd_vel pipeline (controller_server → /cmd_vel direct,

@@ -1,10 +1,19 @@
+# Pas wysokosci ciety w BASE_FOOTPRINT (REP-120, plasko na podlodze):
+# min/max_height to wprost METRY NAD PODLOGA, a /scan renderuje sie na
+# plaszczyznie mapy. Lancuch TF caly statyczny: livox -> base_link (pelvis)
+# -> base_footprint. Montaz lidaru i wysokosc sa PER-ROBOT i podawane argami
+# launcha (lidar_roll/lidar_pitch/lidar_z/footprint_z w sensors_tf.launch.py),
+# NIE tutaj — po kazdym uderzeniu glowy trzeba je przemierzyc od nowa.
+# Strojenie pasa na zywo: tools/scan_height_tuner.py.
+# Pas 0.33..2.03 nad podloga: sciany + niskie przeszkody, sufit odciety.
+# Wartosci sa w metrach nad PODLOGA, wiec przenosne miedzy robotami.
 pointcloud_to_laserscan:
   ros__parameters:
-    target_frame: livox_frame
+    target_frame: base_footprint
     transform_tolerance: 2.0
     queue_size: 40
-    min_height: -0.5
-    max_height: 0.8
+    min_height: 0.33
+    max_height: 2.03
     angle_min: -3.14159
     angle_max: 3.14159
     angle_increment: 0.0087
