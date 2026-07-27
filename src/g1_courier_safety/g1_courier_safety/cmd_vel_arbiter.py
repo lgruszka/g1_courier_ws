@@ -68,6 +68,17 @@ class CmdVelArbiter(Node):
         super().__init__('cmd_vel_arbiter')
 
         self.declare_parameter('output_topic', '/cmd_vel')
+        # Zrodlo komend nawigacji. nav2 publikuje surowe wyjscie kontrolera na
+        # /cmd_vel (u nas remapowane na /cmd_vel_nav), a jego velocity_smoother
+        # czyta to samo i wypuszcza /cmd_vel_smoothed. Jesli arbiter czyta
+        # /cmd_vel_nav, to smoother publikuje W PROZNIE (zmierzone: 0
+        # subskrybentow) i skonfigurowane w nav2_params limity przyspieszenia
+        # NIE dzialaja — komendy do robota sa schodkowe (zmierzone 5.88 m/s2,
+        # czyli skok pelnozakresowy w jednym ticku 20 Hz, przy limicie 2.5).
+        # Dla paczki trzymanej w rekach szarpniecie jest grozniejsze niz zbyt
+        # duza predkosc, dlatego warto ustawic /cmd_vel_smoothed.
+        # Default zostaje /cmd_vel_nav = zachowanie bez zmian.
+        self.declare_parameter('nav_topic', '/cmd_vel_nav')
         self.declare_parameter('publish_rate_hz', 20.0)
         self.declare_parameter('cmd_timeout_s', 0.4)
         # When nav2 owns /cmd_vel directly (Faza 1.5+), set this False so the
@@ -123,14 +134,17 @@ class CmdVelArbiter(Node):
         )
         self.create_subscription(Twist, '/cmd_vel_dock', self._on_dock, 10)
         self.create_subscription(Twist, '/cmd_vel_retreat', self._on_retreat, 10)
-        self.create_subscription(Twist, '/cmd_vel_nav', self._on_nav, 10)
+        nav_topic = str(self.get_parameter('nav_topic').value)
+        self.create_subscription(Twist, nav_topic, self._on_nav, 10)
         self.create_subscription(Bool, '/cmd_vel_estop', self._on_estop, _ESTOP_QOS)
         self.create_service(SetCarryMode, '/safety/set_carry_mode', self._on_set_carry)
         self.create_service(SetFreeze, '/safety/set_freeze', self._on_set_freeze)
 
         rate_hz = max(1.0, float(self.get_parameter('publish_rate_hz').value))
         self.create_timer(1.0 / rate_hz, self._tick)
-        self.get_logger().info('cmd_vel_arbiter ready')
+        self.get_logger().info(
+            f"cmd_vel_arbiter ready (nav: '{nav_topic}'"
+            f"{' — smoother W TORZE' if 'smoothed' in nav_topic else ''})")
 
     # ---------- callbacks ----------
 

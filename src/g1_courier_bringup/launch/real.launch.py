@@ -79,6 +79,15 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument('nav2_params',
             default_value=os.path.join(bringup, 'config', 'nav2_params.yaml')),
+        DeclareLaunchArgument('arbiter_nav_topic', default_value='/cmd_vel_nav',
+            description='Zrodlo komend nav dla cmd_vel_arbitra. Default '
+                        '/cmd_vel_nav = surowe wyjscie kontrolera, zachowanie '
+                        'bez zmian. Ustaw /cmd_vel_smoothed, by wpiac nav2 '
+                        'velocity_smoother do toru — inaczej publikuje on w '
+                        'proznie i limity przyspieszenia z nav2_params NIE '
+                        'dzialaja (zmierzone komendy schodkowe 5.88 m/s2 przy '
+                        'skonfigurowanym limicie 2.5). Istotne przy noszeniu '
+                        'paczki: szarpniecie jest grozniejsze niz predkosc.'),
         DeclareLaunchArgument('nav_bt_xml', default_value=stock_bt,
             description='Drzewo zachowan nav2. Default = STOCKOWE nav2 '
                         '(zachowanie bez zmian). Skrot "courier" wybiera '
@@ -233,7 +242,11 @@ def generate_launch_description() -> LaunchDescription:
             package='g1_courier_safety',
             executable='cmd_vel_arbiter',
             name='cmd_vel_arbiter',
-            parameters=[os.path.join(safety_share, 'config', 'safety.yaml')],
+            parameters=[
+                os.path.join(safety_share, 'config', 'safety.yaml'),
+                # Override PO yamlu: wybor zrodla komend nav (patrz opis argu).
+                {'nav_topic': LaunchConfiguration('arbiter_nav_topic')},
+            ],
         ),
 
         # /cmd_vel → Unitree sport API Request (firmware bridge).
